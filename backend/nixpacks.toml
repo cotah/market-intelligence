@@ -1,0 +1,14 @@
+# Corrige o build do backend no Railway (Nixpacks).
+#
+# Causa do erro "Invalid requirement: 'uv==': Expected end or semicolon":
+# o Nixpacks instala o uv com 'pip install uv==$NIXPACKS_UV_VERSION', mas em
+# algumas versoes do Nixpacks essa variavel vem VAZIA, gerando 'uv=='.
+#
+# Aqui fixamos a versao do uv explicitamente (a MESMA do ambiente local, para
+# que ele leia o uv.lock sem incompatibilidade de formato). Assim o build nao
+# depende mais da variavel vir resolvida pelo Nixpacks.
+
+providers = ["python"]
+
+[variables]
+NIXPACKS_UV_VERSION = "0.11.9"
