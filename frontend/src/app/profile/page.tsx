@@ -70,8 +70,14 @@ type FormState = Record<keyof FounderProfile, string>;
 function toForm(p: FounderProfile): FormState {
   const form = {} as FormState;
   for (const field of FIELDS) {
-    const value = p[field];
-    form[field] = Array.isArray(value) ? value.join(", ") : (value ?? "");
+    if (LIST_FIELDS.includes(field)) {
+      // Campos de lista nunca podem ser undefined: fallback para [] antes do join.
+      // (Protege contra um backend que ainda nao tenha ai_tools/software_tools/etc.)
+      const list = (p[field] as string[] | undefined) ?? [];
+      form[field] = list.join(", ");
+    } else {
+      form[field] = (p[field] as string | undefined) ?? "";
+    }
   }
   return form;
 }
