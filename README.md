@@ -352,7 +352,8 @@ npm run dev
 O backend (API + worker + beat + Postgres + Redis) roda no **Railway**.
 O frontend roda na **Vercel**. O codigo ja esta preparado:
 
-- `backend/railway.toml` — build (Nixpacks/uv) + start da API + healthcheck
+- `backend/Dockerfile` — imagem de producao (uv pinado); usada pelo Railway
+- `backend/railway.toml` — aponta o build para o Dockerfile + healthcheck
 - `backend/Procfile` — define os 3 processos: `web`, `worker`, `beat`
 - `frontend/vercel.json` — config de build do Next.js
 - `DATABASE_URL` / `REDIS_URL` do Railway sao lidos e normalizados automaticamente
@@ -381,7 +382,7 @@ git push -u origin main
 1. **+ New → GitHub Repo** → selecione o repo.
 2. Em **Settings** do servico:
    - **Root Directory:** `backend`
-   - **Start Command:** deixe o do `railway.toml` (ja roda migrations + uvicorn).
+   - **Start Command:** deixe vazio (o `CMD` do Dockerfile roda migrations + uvicorn).
 3. Em **Variables**, adicione (use referencia aos plugins):
    - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
    - `REDIS_URL` = `${{Redis.REDIS_URL}}`
@@ -397,7 +398,7 @@ git push -u origin main
 1. **+ New → GitHub Repo** → o **mesmo** repo (cria outro servico).
 2. **Settings:**
    - **Root Directory:** `backend`
-   - **Custom Start Command:** `uv run celery -A celery_app worker --loglevel=info --concurrency=2`
+   - **Custom Start Command:** `uv run --no-sync celery -A celery_app worker --loglevel=info --concurrency=2`
    - **Networking:** sem dominio (nao e HTTP).
    - **Healthcheck:** deixe vazio (esse servico nao responde HTTP).
 3. **Variables:** as mesmas do Passo 2 (DATABASE_URL, REDIS_URL e as chaves).
@@ -407,7 +408,7 @@ git push -u origin main
 1. **+ New → GitHub Repo** → o mesmo repo de novo.
 2. **Settings:**
    - **Root Directory:** `backend`
-   - **Custom Start Command:** `uv run celery -A celery_app beat --loglevel=info`
+   - **Custom Start Command:** `uv run --no-sync celery -A celery_app beat --loglevel=info`
    - Sem dominio, sem healthcheck.
 3. **Variables:** as mesmas (DATABASE_URL, REDIS_URL, chaves).
 

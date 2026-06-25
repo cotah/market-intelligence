@@ -1,0 +1,30 @@
+# Imagem de producao do backend (usada no Railway).
+# Controle total do build com uv pinado, sem depender do Nixpacks.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0
+
+WORKDIR /app
+
+# uv pinado na mesma versao do ambiente local (compativel com o uv.lock).
+RUN pip install --no-cache-dir uv==0.11.9
+
+# 1) Instala SO as dependencias. Esta camada fica em cache enquanto o
+#    pyproject/uv.lock nao mudam. --no-install-project porque o codigo
+#    do projeto ainda nao foi copiado.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --no-dev --frozen --no-install-project
+
+# 2) Copia o codigo e instala o proprio projeto.
+COPY . .
+RUN uv sync --no-dev --frozen
+
+# Web: roda as migrations e sobe a API. $PORT e injetado pelo Railway.
+# exec-form com sh -c (precisamos do && e da expansao de $PORT); 'exec' faz o
+# uvicorn substituir o shell, para receber o SIGTERM no shutdown.
+# Os servicos worker e beat sobrescrevem este comando no Railway
+# (Custom Start Command). Veja README -> Deploy.
+CMD ["sh", "-c", "uv run --no-sync alembic upgrade head && exec uv run --no-sync uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

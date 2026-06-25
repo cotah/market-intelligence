@@ -1,15 +1,15 @@
 # Configuracao de deploy do backend no Railway.
-# O Railway detecta o projeto Python (pyproject.toml + uv.lock) e usa uv
-# automaticamente via Nixpacks. Este arquivo vale para o servico WEB (a API).
-# Os servicos de worker e beat usam o mesmo repo, mas com Start Command
-# proprio (veja README -> Deploy, e o Procfile).
+# Usamos um Dockerfile proprio (backend/Dockerfile) em vez do Nixpacks, para
+# ter controle total do build e fixar o uv. Vale para o servico WEB (a API).
+# Os servicos worker e beat usam o mesmo repo/imagem, mas com Start Command
+# proprio no Railway (veja README -> Deploy).
 
 [build]
-builder = "nixpacks"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-# Roda as migrations e sobe a API. $PORT e injetado pelo Railway.
-startCommand = "uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port $PORT"
+# O comando de start do web vem do CMD do Dockerfile (migrations + uvicorn).
 healthcheckPath = "/health"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"

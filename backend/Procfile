@@ -7,6 +7,6 @@
 #
 # Localmente nada disso muda: continue usando uvicorn/celery via uv run.
 
-web: uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port $PORT
-worker: uv run celery -A celery_app worker --loglevel=info --concurrency=2
-beat: uv run celery -A celery_app beat --loglevel=info
+web: uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn main:app --host 0.0.0.0 --port $PORT
+worker: uv run --no-sync celery -A celery_app worker --loglevel=info --concurrency=2
+beat: uv run --no-sync celery -A celery_app beat --loglevel=info
