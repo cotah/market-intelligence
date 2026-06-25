@@ -1,0 +1,31 @@
+# ==========================================================
+# .gitignore raiz (camada extra; backend/ e frontend/ tem os seus).
+# ==========================================================
+
+# Segredos (NUNCA commitar) - belt and suspenders
+.env
+.env.local
+**/.env
+**/.env.local
+*.env
+!**/.env.example
+
+# Ferramentas locais / IDE
+.claude/
+.gstack/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python
+**/__pycache__/
+**/.venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Node / Next
+**/node_modules/
+**/.next/
+**/out/

@@ -1,0 +1,20 @@
+# Env / segredos
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# uv: o uv.lock E COMMITADO (build reproduzivel no Railway).
+
+# OS
+.DS_Store
+Thumbs.db

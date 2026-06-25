@@ -1,0 +1,10 @@
+# Normaliza finais de linha como LF no repositorio (Railway/Linux).
+* text=auto eol=lf
+
+# Binarios nao devem ser tocados.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary

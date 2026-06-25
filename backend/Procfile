@@ -1,0 +1,12 @@
+# Tipos de processo. No Railway, crie um servico por linha (mesmo repo,
+# Root Directory = backend) e use o comando correspondente como Start Command.
+#
+#   web   -> a API FastAPI (roda migrations no boot)
+#   worker-> processa as tarefas da pipeline (Celery worker)
+#   beat  -> agendador: dispara a rodada periodica e o relatorio diario
+#
+# Localmente nada disso muda: continue usando uvicorn/celery via uv run.
+
+web: uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port $PORT
+worker: uv run celery -A celery_app worker --loglevel=info --concurrency=2
+beat: uv run celery -A celery_app beat --loglevel=info
