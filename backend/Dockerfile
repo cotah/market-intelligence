@@ -22,9 +22,9 @@ RUN uv sync --no-dev --frozen --no-install-project
 COPY . .
 RUN uv sync --no-dev --frozen
 
-# Web: roda as migrations e sobe a API. $PORT e injetado pelo Railway.
-# exec-form com sh -c (precisamos do && e da expansao de $PORT); 'exec' faz o
-# uvicorn substituir o shell, para receber o SIGTERM no shutdown.
+# Web: roda as migrations e sobe a API.
+# IMPORTANTE: a porta vem de $PORT (injetada pelo Railway). Nunca hardcodar.
+# Shell-form para o && e a expansao de ${PORT:-8000} funcionarem.
 # Os servicos worker e beat sobrescrevem este comando no Railway
 # (Custom Start Command). Veja README -> Deploy.
-CMD ["sh", "-c", "uv run --no-sync alembic upgrade head && exec uv run --no-sync uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
