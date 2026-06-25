@@ -74,3 +74,18 @@ export interface PipelineAction {
   message: string;
   task_id: string | null;
 }
+
+// Perfil do fundador (editavel em /profile). Espelha FounderProfileSchema.
+export interface FounderProfile {
+  name: string;
+  current_country: string;
+  active_markets: string[];
+  technical_skills: string[];
+  business_skills: string[];
+  target_business_type: string[];
+  tools_available: string[];
+  active_projects: string;
+  budget_range: string;
+  avoid: string[];
+  languages: string[];
+}

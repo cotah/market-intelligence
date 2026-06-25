@@ -10,7 +10,7 @@ import json
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
-from core.founder_profile import get_profile_as_text
+from core.founder_profile import default_profile_dict, profile_to_text
 from core.logging_config import get_logger
 
 log = get_logger("agents.founder_compatibility")
@@ -20,7 +20,9 @@ _MIN_COMPATIBILITY = 50
 _SYSTEM = (
     "You evaluate how well a business idea fits a specific founder's profile. "
     "Be realistic about skill gaps and time-to-MVP for a solo bootstrap founder. "
-    "Score is 0-100 (how executable this is for THIS founder)."
+    "Geography matters: an opportunity aligned with the founder's current "
+    "country or active markets is more executable (local presence, network, "
+    "regulatory familiarity). Score is 0-100."
 )
 
 
@@ -35,11 +37,23 @@ class FounderCompatibilityAgent(BaseAgent):
         if context.ai_opportunity_data:
             ai_role = context.ai_opportunity_data.get("ai_role", "")
 
-        prompt = f"""{get_profile_as_text()}
+        # Perfil vem do banco (carregado pela pipeline); fallback no default.
+        profile = context.founder_profile or default_profile_dict()
+        country = profile.get("current_country", "") or "n/a"
+        markets = ", ".join(profile.get("active_markets", []) or []) or "n/a"
+
+        prompt = f"""{profile_to_text(profile)}
 
 BUSINESS IDEA: "{topic}"
 How AI is involved: {ai_role or "n/a"}
 Problem context: {json.dumps((context.problem_data or {}).get("pain_phrases", [])[:3], ensure_ascii=False)}
+
+GEOGRAPHIC WEIGHTING (apply this when scoring):
+- The founder is currently based in: {country}
+- Active markets: {markets}
+- If this opportunity targets or fits the founder's current country or active
+  markets, INCREASE the score (local presence, network, regulatory know-how).
+- If it requires being in a market the founder is NOT in, LOWER the score.
 
 Evaluate fit for THIS founder. Return JSON:
 {{
@@ -47,6 +61,7 @@ Evaluate fit for THIS founder. Return JSON:
   "available_knowledge_pct": 0-100,
   "gap": 0-100,
   "time_to_mvp": "e.g. 2 months",
+  "geographic_fit": "high | medium | low",
   "missing_skills": ["..."],
   "reasoning": "short"
 }}"""

@@ -26,6 +26,7 @@ export default function RootLayout({
             <nav className="flex items-center gap-1 text-sm">
               <NavLink href="/" label="Dashboard" />
               <NavLink href="/reports" label="Relatorios" />
+              <NavLink href="/profile" label="Perfil" />
             </nav>
           </div>
         </header>

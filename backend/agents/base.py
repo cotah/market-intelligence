@@ -15,6 +15,9 @@ class PipelineContext:
     topic: str  # Topico sendo analisado
     opportunity_id: str  # ID no banco
 
+    # Perfil do fundador carregado do banco (formato dict). Usado pelo Agente 6.
+    founder_profile: dict | None = None
+
     trend_data: dict | None = None
     problem_data: dict | None = None
     competitor_data: dict | None = None

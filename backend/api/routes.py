@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas import (
     DailyReportOut,
+    FounderProfileSchema,
     OpportunityListItem,
     OpportunityOut,
     PipelineActionOut,
@@ -19,6 +20,7 @@ from api.schemas import (
 )
 from core import pipeline_control
 from core.database import get_session
+from core.founder_profile_service import get_profile, profile_to_dict, save_profile
 from core.logging_config import get_logger
 from models import DailyReport, Opportunity, OpportunityStatus
 
@@ -56,6 +58,25 @@ async def get_opportunity(
     if opp is None:
         raise HTTPException(status_code=404, detail="Opportunity not found")
     return opp
+
+
+# --------------------------- Founder Profile ----------------------------
+@router.get("/founder-profile", response_model=FounderProfileSchema)
+async def read_founder_profile(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    profile = await get_profile(session)
+    return profile_to_dict(profile)
+
+
+@router.put("/founder-profile", response_model=FounderProfileSchema)
+async def update_founder_profile(
+    payload: FounderProfileSchema,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    profile = await save_profile(session, payload.model_dump())
+    log.info("api.founder_profile.updated")
+    return profile_to_dict(profile)
 
 
 # ------------------------------- Reports --------------------------------

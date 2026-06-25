@@ -2,6 +2,7 @@
 
 import type {
   DailyReport,
+  FounderProfile,
   Opportunity,
   OpportunityListItem,
   OpportunityStatus,
@@ -74,6 +75,13 @@ export const api = {
   startPipeline: () => request<PipelineAction>("/pipeline/start", { method: "POST" }),
   stopPipeline: () => request<PipelineAction>("/pipeline/stop", { method: "POST" }),
   runOnce: () => request<PipelineAction>("/pipeline/run-once", { method: "POST" }),
+
+  getFounderProfile: () => request<FounderProfile>("/founder-profile"),
+  saveFounderProfile: (profile: FounderProfile) =>
+    request<FounderProfile>("/founder-profile", {
+      method: "PUT",
+      body: JSON.stringify(profile),
+    }),
 };
 
 export { ApiError, BASE_URL };

@@ -3,7 +3,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from models.opportunity import OpportunityStatus
 
@@ -73,3 +73,19 @@ class PipelineActionOut(BaseModel):
     ok: bool
     message: str
     task_id: str | None = None
+
+
+class FounderProfileSchema(BaseModel):
+    """Perfil do fundador (usado tanto no GET quanto no PUT)."""
+
+    name: str = ""
+    current_country: str = ""
+    active_markets: list[str] = Field(default_factory=list)
+    technical_skills: list[str] = Field(default_factory=list)
+    business_skills: list[str] = Field(default_factory=list)
+    target_business_type: list[str] = Field(default_factory=list)
+    tools_available: list[str] = Field(default_factory=list)
+    active_projects: str = ""
+    budget_range: str = "bootstrap"
+    avoid: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)

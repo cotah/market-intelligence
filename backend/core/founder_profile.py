@@ -49,3 +49,46 @@ Budget: {p["budget_range"]}
 Tools available: {", ".join(p["tools_available"])}
 Preferred business types: {", ".join(p["target_business_type"])}
 Avoid: {", ".join(p["avoid"])}"""
+
+
+def default_profile_dict() -> dict:
+    """Perfil padrao no formato NOVO (usado para semear o banco e como
+    fallback quando o perfil ainda nao foi carregado do banco)."""
+    p = FOUNDER_PROFILE
+    location = p["location"]
+    country = location.split(",")[-1].strip() if "," in location else location
+    return {
+        "name": p["name"],
+        "current_country": country,
+        "active_markets": list(p["markets"]),
+        "technical_skills": list(p["skills"]["technical"]),
+        "business_skills": list(p["skills"]["business"]),
+        "target_business_type": list(p["target_business_type"]),
+        "tools_available": list(p["tools_available"]),
+        "active_projects": ", ".join(p["active_projects"]),
+        "budget_range": p["budget_range"],
+        "avoid": list(p["avoid"]),
+        "languages": list(p["languages"]),
+    }
+
+
+def profile_to_text(p: dict) -> str:
+    """Formata um perfil (dict no formato novo) para inserir nos prompts."""
+
+    def joined(key: str) -> str:
+        return ", ".join(p.get(key, []) or [])
+
+    return f"""FOUNDER PROFILE
+Name: {p.get("name", "")}
+Current country: {p.get("current_country", "")}
+Active markets: {joined("active_markets")}
+Languages: {joined("languages")}
+
+Technical skills: {joined("technical_skills")}
+Business skills: {joined("business_skills")}
+
+Active projects: {p.get("active_projects", "")}
+Budget: {p.get("budget_range", "")}
+Tools available: {joined("tools_available")}
+Preferred business types: {joined("target_business_type")}
+Avoid: {joined("avoid")}"""

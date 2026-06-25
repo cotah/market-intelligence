@@ -22,6 +22,7 @@ from agents.project_generator import ProjectGeneratorAgent
 from agents.scorer import ScorerAgent
 from agents.trend_hunter import TrendHunterAgent
 from core.config import settings
+from core.founder_profile_service import get_profile, profile_to_dict
 from core.logging_config import get_logger
 from models import Opportunity, OpportunityStatus
 
@@ -66,13 +67,16 @@ class Pipeline:
         limit = topics_limit or settings.pipeline_topics_per_run
         log.info("pipeline.run_once.started", topics_limit=limit)
 
+        # Carrega o perfil do fundador uma vez por rodada (compartilhado entre topicos).
+        profile = profile_to_dict(await get_profile(session))
+
         discovery = await self.trend_hunter.discover_topics(limit=limit)
         topics = discovery.get("topics", [])
 
         summary = {"topics": len(topics), "completed": 0, "discarded": 0, "opportunity_ids": []}
 
         for topic_data in topics:
-            opp = await self._process_topic(session, topic_data)
+            opp = await self._process_topic(session, topic_data, profile)
             summary["opportunity_ids"].append(str(opp.id))
             if opp.status == OpportunityStatus.DISCARDED:
                 summary["discarded"] += 1
@@ -82,7 +86,9 @@ class Pipeline:
         log.info("pipeline.run_once.completed", **{k: v for k, v in summary.items() if k != "opportunity_ids"})
         return summary
 
-    async def _process_topic(self, session: AsyncSession, topic_data: dict) -> Opportunity:
+    async def _process_topic(
+        self, session: AsyncSession, topic_data: dict, profile: dict | None = None
+    ) -> Opportunity:
         topic_name = topic_data.get("name", "Unknown topic")
 
         opp = Opportunity(
@@ -99,6 +105,7 @@ class Pipeline:
             topic=topic_name,
             opportunity_id=str(opp.id),
             trend_data=topic_data,
+            founder_profile=profile,
         )
 
         for agent in self.agents:
