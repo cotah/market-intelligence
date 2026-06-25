@@ -1,6 +1,9 @@
 # Normaliza finais de linha como LF no repositorio (Railway/Linux).
 * text=auto eol=lf
 
+# Scripts shell SEMPRE em LF (CRLF quebra o shebang no Linux).
+*.sh text eol=lf
+
 # Binarios nao devem ser tocados.
 *.png binary
 *.jpg binary

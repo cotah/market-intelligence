@@ -22,9 +22,11 @@ RUN uv sync --no-dev --frozen --no-install-project
 COPY . .
 RUN uv sync --no-dev --frozen
 
-# Web: roda as migrations e sobe a API.
-# IMPORTANTE: a porta vem de $PORT (injetada pelo Railway). Nunca hardcodar.
-# Shell-form para o && e a expansao de ${PORT:-8000} funcionarem.
-# Os servicos worker e beat sobrescrevem este comando no Railway
-# (Custom Start Command). Veja README -> Deploy.
-CMD uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Entrypoint com logs explicitos: roda as migrations e sobe a API.
+# Se o alembic falhar, o 'set -e' derruba o container com erro visivel
+# (em vez de seguir silenciosamente e dar 502). A porta vem de $PORT.
+# Os servicos worker e beat sobrescrevem o comando no Railway (Custom Start
+# Command). Veja README -> Deploy.
+COPY entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+CMD ["./entrypoint.sh"]
