@@ -4,15 +4,34 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { FounderProfile } from "@/lib/types";
 
-// Campos que sao listas (editados como texto separado por virgula).
+// Campos que sao listas (tags separadas por virgula).
 const LIST_FIELDS: ReadonlyArray<keyof FounderProfile> = [
   "active_markets",
   "technical_skills",
   "business_skills",
   "target_business_type",
-  "tools_available",
+  "ai_tools",
+  "software_tools",
+  "hardware_tools",
   "avoid",
   "languages",
+];
+
+// Ordem dos campos no formulario.
+const FIELDS: ReadonlyArray<keyof FounderProfile> = [
+  "name",
+  "current_country",
+  "active_markets",
+  "languages",
+  "technical_skills",
+  "business_skills",
+  "target_business_type",
+  "ai_tools",
+  "software_tools",
+  "hardware_tools",
+  "active_projects",
+  "budget_range",
+  "avoid",
 ];
 
 const LABELS: Record<keyof FounderProfile, string> = {
@@ -22,7 +41,9 @@ const LABELS: Record<keyof FounderProfile, string> = {
   technical_skills: "Skills tecnicas",
   business_skills: "Skills de negocio",
   target_business_type: "Tipos de negocio preferidos",
-  tools_available: "Ferramentas disponiveis",
+  ai_tools: "Ferramentas de IA",
+  software_tools: "Ferramentas de Software",
+  hardware_tools: "Equipamentos e Hardware",
   active_projects: "Projetos ativos",
   budget_range: "Faixa de orcamento",
   avoid: "Evitar",
@@ -34,14 +55,43 @@ const HINTS: Partial<Record<keyof FounderProfile, string>> = {
   technical_skills: "Separe por virgula.",
   business_skills: "Separe por virgula.",
   target_business_type: "Separe por virgula. Ex: SaaS, Micro-SaaS",
-  tools_available: "Separe por virgula.",
+  ai_tools: "Separe por virgula. Ex: Claude Code, ChatGPT, Cursor",
+  software_tools: "Separe por virgula. Ex: Vercel, Railway, Supabase, GitHub",
+  hardware_tools: "Separe por virgula. Ex: Impressora 3D Creality, NFC Reader, iPhone",
   avoid: "Separe por virgula. O que voce nao quer construir.",
   languages: "Separe por virgula. Ex: Portugues, Ingles",
   budget_range: "Ex: bootstrap, ate 5k, ate 20k",
 };
 
+// Estado do formulario: tudo como string (listas viram texto separado por virgula).
+// Isso evita reprocessar o texto a cada tecla — espacos sao preservados normalmente.
+type FormState = Record<keyof FounderProfile, string>;
+
+function toForm(p: FounderProfile): FormState {
+  const form = {} as FormState;
+  for (const field of FIELDS) {
+    const value = p[field];
+    form[field] = Array.isArray(value) ? value.join(", ") : (value ?? "");
+  }
+  return form;
+}
+
+function toProfile(form: FormState): FounderProfile {
+  const splitTags = (s: string) =>
+    s
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+  const out: Record<string, unknown> = {};
+  for (const field of FIELDS) {
+    out[field] = LIST_FIELDS.includes(field) ? splitTags(form[field]) : form[field];
+  }
+  return out as unknown as FounderProfile;
+}
+
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<FounderProfile | null>(null);
+  const [form, setForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,7 +101,7 @@ export default function ProfilePage() {
     setLoading(true);
     try {
       const data = await api.getFounderProfile();
-      setProfile(data);
+      setForm(toForm(data));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar o perfil");
@@ -65,25 +115,17 @@ export default function ProfilePage() {
   }, [load]);
 
   function setField(field: keyof FounderProfile, value: string) {
-    if (!profile) return;
-    if (LIST_FIELDS.includes(field)) {
-      const list = value
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      setProfile({ ...profile, [field]: list });
-    } else {
-      setProfile({ ...profile, [field]: value });
-    }
+    // Guarda o texto cru — sem split/trim aqui, para nao atrapalhar a digitacao.
+    setForm((prev) => (prev ? { ...prev, [field]: value } : prev));
   }
 
   async function save() {
-    if (!profile) return;
+    if (!form) return;
     setBusy(true);
     setFlash(null);
     try {
-      const saved = await api.saveFounderProfile(profile);
-      setProfile(saved);
+      const saved = await api.saveFounderProfile(toProfile(form));
+      setForm(toForm(saved));
       setFlash("Perfil salvo. O proximo ciclo da pipeline ja usa essas informacoes.");
     } catch (e) {
       setFlash(e instanceof Error ? e.message : "Erro ao salvar");
@@ -99,10 +141,10 @@ export default function ProfilePage() {
           <h1 className="text-xl font-semibold text-zinc-100">Perfil do fundador</h1>
           <p className="text-sm text-zinc-500">
             Usado pelo agente de compatibilidade para pontuar oportunidades de acordo com
-            o seu pais, mercados e skills.
+            o seu pais, mercados, skills e ferramentas.
           </p>
         </div>
-        {profile && (
+        {form && (
           <button
             onClick={save}
             disabled={busy}
@@ -122,18 +164,14 @@ export default function ProfilePage() {
 
       {loading ? (
         <p className="py-12 text-center text-sm text-zinc-500">Carregando...</p>
-      ) : profile ? (
+      ) : form ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {(Object.keys(LABELS) as Array<keyof FounderProfile>).map((field) => (
+          {FIELDS.map((field) => (
             <Field
               key={field}
               label={LABELS[field]}
               hint={HINTS[field]}
-              value={
-                LIST_FIELDS.includes(field)
-                  ? (profile[field] as string[]).join(", ")
-                  : (profile[field] as string)
-              }
+              value={form[field]}
               multiline={field === "active_projects"}
               onChange={(v) => setField(field, v)}
             />

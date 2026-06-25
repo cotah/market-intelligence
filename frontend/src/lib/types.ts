@@ -83,7 +83,9 @@ export interface FounderProfile {
   technical_skills: string[];
   business_skills: string[];
   target_business_type: string[];
-  tools_available: string[];
+  ai_tools: string[];
+  software_tools: string[];
+  hardware_tools: string[];
   active_projects: string;
   budget_range: string;
   avoid: string[];

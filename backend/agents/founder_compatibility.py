@@ -41,6 +41,9 @@ class FounderCompatibilityAgent(BaseAgent):
         profile = context.founder_profile or default_profile_dict()
         country = profile.get("current_country", "") or "n/a"
         markets = ", ".join(profile.get("active_markets", []) or []) or "n/a"
+        ai_tools = ", ".join(profile.get("ai_tools", []) or []) or "n/a"
+        software_tools = ", ".join(profile.get("software_tools", []) or []) or "n/a"
+        hardware_tools = ", ".join(profile.get("hardware_tools", []) or []) or "n/a"
 
         prompt = f"""{profile_to_text(profile)}
 
@@ -54,6 +57,14 @@ GEOGRAPHIC WEIGHTING (apply this when scoring):
 - If this opportunity targets or fits the founder's current country or active
   markets, INCREASE the score (local presence, network, regulatory know-how).
 - If it requires being in a market the founder is NOT in, LOWER the score.
+
+FOUNDER TOOLING (what the founder can already build and ship with):
+- AI tools: {ai_tools}
+- Software / infrastructure: {software_tools}
+- Hardware & equipment: {hardware_tools}
+- If the idea can be built mostly with tools the founder ALREADY has, raise
+  available_knowledge_pct and shorten time_to_mvp. If it needs AI/software/hardware
+  the founder lacks, increase the gap and lengthen time_to_mvp.
 
 Evaluate fit for THIS founder. Return JSON:
 {{

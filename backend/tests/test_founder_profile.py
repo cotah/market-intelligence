@@ -123,6 +123,45 @@ async def test_compatibility_injects_country_and_markets_from_profile(monkeypatc
     assert result.should_discard is False
 
 
+async def test_compatibility_injects_separated_tools(monkeypatch):
+    import agents.founder_compatibility as fc
+
+    captured: dict[str, str] = {}
+
+    async def fake_ask_json(prompt, *args, **kwargs):
+        captured["prompt"] = prompt
+        return {"score": 70}
+
+    monkeypatch.setattr(fc.llm, "ask_json", fake_ask_json)
+
+    ctx = _ctx()
+    ctx.founder_profile = {
+        "ai_tools": ["Claude Code"],
+        "software_tools": ["Vercel"],
+        "hardware_tools": ["NFC Reader"],
+    }
+
+    await fc.FounderCompatibilityAgent().run(ctx)
+
+    prompt = captured["prompt"]
+    assert "FOUNDER TOOLING" in prompt
+    assert "Claude Code" in prompt
+    assert "Vercel" in prompt
+    assert "NFC Reader" in prompt
+
+
+def test_default_profile_has_separated_tools():
+    from core.founder_profile import default_profile_dict
+
+    d = default_profile_dict()
+
+    assert d["ai_tools"]  # nao vazio
+    assert "software_tools" in d
+    assert "hardware_tools" in d
+    # O campo legado nao faz mais parte do perfil dinamico.
+    assert "tools_available" not in d
+
+
 async def test_compatibility_falls_back_to_default_profile(monkeypatch):
     import agents.founder_compatibility as fc
 

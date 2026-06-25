@@ -84,7 +84,9 @@ class FounderProfileSchema(BaseModel):
     technical_skills: list[str] = Field(default_factory=list)
     business_skills: list[str] = Field(default_factory=list)
     target_business_type: list[str] = Field(default_factory=list)
-    tools_available: list[str] = Field(default_factory=list)
+    ai_tools: list[str] = Field(default_factory=list)
+    software_tools: list[str] = Field(default_factory=list)
+    hardware_tools: list[str] = Field(default_factory=list)
     active_projects: str = ""
     budget_range: str = "bootstrap"
     avoid: list[str] = Field(default_factory=list)

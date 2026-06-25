@@ -23,10 +23,15 @@ FOUNDER_PROFILE: dict = {
     "markets": ["Ireland", "Europe", "Brazil", "Portuguese-speaking markets"],
     "active_projects": ["SmartTap", "TALOA", "InMyHouses"],
     "budget_range": "bootstrap",
+    # Legado (usado por get_profile_as_text / project_generator).
     "tools_available": [
         "Claude Code", "OpenAI", "Vercel", "Railway",
         "Supabase", "Stripe", "Canva", "GitHub",
     ],
+    # Ferramentas separadas por categoria (perfil dinamico / Agente 6).
+    "ai_tools": ["Claude Code", "OpenAI", "ChatGPT", "Cursor"],
+    "software_tools": ["Vercel", "Railway", "Supabase", "Stripe", "GitHub", "Canva"],
+    "hardware_tools": ["3D Printer", "NFC Reader"],
     "target_business_type": ["SaaS", "Marketplace", "B2B", "Automation"],
     "avoid": ["physical_retail", "requires_large_team", "high_regulatory_overhead"],
 }
@@ -64,7 +69,9 @@ def default_profile_dict() -> dict:
         "technical_skills": list(p["skills"]["technical"]),
         "business_skills": list(p["skills"]["business"]),
         "target_business_type": list(p["target_business_type"]),
-        "tools_available": list(p["tools_available"]),
+        "ai_tools": list(p["ai_tools"]),
+        "software_tools": list(p["software_tools"]),
+        "hardware_tools": list(p["hardware_tools"]),
         "active_projects": ", ".join(p["active_projects"]),
         "budget_range": p["budget_range"],
         "avoid": list(p["avoid"]),
@@ -89,6 +96,10 @@ Business skills: {joined("business_skills")}
 
 Active projects: {p.get("active_projects", "")}
 Budget: {p.get("budget_range", "")}
-Tools available: {joined("tools_available")}
+
+AI tools: {joined("ai_tools")}
+Software tools: {joined("software_tools")}
+Hardware & equipment: {joined("hardware_tools")}
+
 Preferred business types: {joined("target_business_type")}
 Avoid: {joined("avoid")}"""

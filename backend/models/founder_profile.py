@@ -25,7 +25,16 @@ class FounderProfile(Base):
     technical_skills: Mapped[list] = mapped_column(JSONB, default=list)
     business_skills: Mapped[list] = mapped_column(JSONB, default=list)
     target_business_type: Mapped[list] = mapped_column(JSONB, default=list)
+
+    # Ferramentas separadas por categoria (contexto mais rico para o Agente 6).
+    ai_tools: Mapped[list] = mapped_column(JSONB, default=list)
+    software_tools: Mapped[list] = mapped_column(JSONB, default=list)
+    hardware_tools: Mapped[list] = mapped_column(JSONB, default=list)
+
+    # Legado: mantido por compatibilidade (coluna ja existente no banco).
+    # Nao e mais exposto na API/UI; substituido por ai/software/hardware_tools.
     tools_available: Mapped[list] = mapped_column(JSONB, default=list)
+
     active_projects: Mapped[str] = mapped_column(Text, default="")
     budget_range: Mapped[str] = mapped_column(String(50), default="bootstrap")
     avoid: Mapped[list] = mapped_column(JSONB, default=list)
