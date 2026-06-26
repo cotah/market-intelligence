@@ -73,17 +73,50 @@ class Pipeline:
         discovery = await self.trend_hunter.discover_topics(limit=limit)
         topics = discovery.get("topics", [])
 
-        summary = {"topics": len(topics), "completed": 0, "discarded": 0, "opportunity_ids": []}
+        # Log explicito de quantos (e quais) topicos o Trend Hunter achou.
+        topic_names = [t.get("name", "?") for t in topics]
+        log.info("pipeline.topics_discovered", count=len(topics), topics=topic_names)
+        if not topics:
+            log.warning(
+                "pipeline.no_topics_found",
+                hint="Trend Hunter retornou 0 topicos. Verifique Serper/Grok/Perplexity/LLM.",
+            )
 
-        for topic_data in topics:
+        # `discards` guarda o motivo de cada descarte (topico + agente + razao),
+        # tanto para os logs quanto para aparecer no status/dashboard.
+        summary = {
+            "topics": len(topics),
+            "completed": 0,
+            "discarded": 0,
+            "discards": [],
+            "opportunity_ids": [],
+        }
+
+        for index, topic_data in enumerate(topics, start=1):
+            log.info(
+                "pipeline.topic.processing",
+                position=f"{index}/{len(topics)}",
+                topic=topic_data.get("name", "?"),
+            )
             opp = await self._process_topic(session, topic_data, profile)
             summary["opportunity_ids"].append(str(opp.id))
             if opp.status == OpportunityStatus.DISCARDED:
                 summary["discarded"] += 1
+                summary["discards"].append(
+                    {"topic": opp.title, "by": opp.discarded_by, "reason": opp.discard_reason}
+                )
             else:
                 summary["completed"] += 1
 
-        log.info("pipeline.run_once.completed", **{k: v for k, v in summary.items() if k != "opportunity_ids"})
+        # Resumo final legivel: quantos entraram, quantos passaram, quantos
+        # caíram e o porque de cada queda.
+        log.info(
+            "pipeline.run_once.completed",
+            topics=summary["topics"],
+            completed=summary["completed"],
+            discarded=summary["discarded"],
+            discards=summary["discards"],
+        )
         return summary
 
     async def _process_topic(
@@ -100,6 +133,8 @@ class Pipeline:
         )
         session.add(opp)
         await session.flush()  # garante opp.id
+
+        log.info("pipeline.topic.started", topic=topic_name, opportunity_id=str(opp.id))
 
         context = PipelineContext(
             topic=topic_name,
@@ -125,13 +160,27 @@ class Pipeline:
                 opp.status = OpportunityStatus.DISCARDED
                 opp.discard_reason = result.discard_reason
                 opp.discarded_by = agent.name
-                log.info("pipeline.topic.discarded", topic=topic_name, by=agent.name, reason=result.discard_reason)
+                log.info(
+                    "pipeline.topic.discarded",
+                    topic=topic_name,
+                    by=agent.name,
+                    reason=result.discard_reason,
+                )
                 await session.flush()
                 return opp
 
+            # Rastreia cada agente que o topico passou, para saber exatamente
+            # ate onde ele chegou antes de (eventualmente) ser descartado.
+            log.info("pipeline.agent.passed", topic=topic_name, agent=agent.name)
+
         opp.status = OpportunityStatus.COMPLETED
         await session.flush()
-        log.info("pipeline.topic.completed", topic=topic_name, opportunity_id=str(opp.id))
+        log.info(
+            "pipeline.topic.completed",
+            topic=topic_name,
+            opportunity_id=str(opp.id),
+            score_total=opp.score_total,
+        )
         return opp
 
 

@@ -76,7 +76,13 @@ Return a JSON object with this exact shape:
             raise AgentException(f"TrendHunter failed to consolidate topics: {e}") from e
 
         topics = data.get("topics", []) if isinstance(data, dict) else []
-        log.info("trend_hunter.completed", topics_count=len(topics))
+        topic_names = [t.get("name", "?") for t in topics if isinstance(t, dict)]
+        log.info("trend_hunter.completed", topics_count=len(topics), topics=topic_names)
+        if not topics:
+            log.warning(
+                "trend_hunter.no_topics",
+                hint="LLM nao retornou topicos. Fontes podem ter vindo vazias.",
+            )
         return {"topics": topics}
 
     async def run(self, context: PipelineContext) -> AgentResult:

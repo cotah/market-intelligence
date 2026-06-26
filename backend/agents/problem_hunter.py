@@ -76,6 +76,19 @@ Only include pain_phrases that are backed by the discussions above."""
 
         pain_phrases = data.get("pain_phrases", []) if isinstance(data, dict) else []
         evidence_count = len(pain_phrases)
+        problems_count = len(data.get("problems", [])) if isinstance(data, dict) else 0
+        has_real_pain = bool(data.get("has_real_pain")) if isinstance(data, dict) else False
+
+        # Log explicito: mostra se o Problem Hunter realmente achou dor, quantas
+        # evidencias e quantos problemas, antes de aplicar o criterio de descarte.
+        log.info(
+            "problem_hunter.extracted",
+            topic=topic,
+            pain_phrases=evidence_count,
+            problems=problems_count,
+            has_real_pain=has_real_pain,
+            min_required=_MIN_PAIN_EVIDENCES,
+        )
 
         # 3. Criterio de descarte.
         if evidence_count < _MIN_PAIN_EVIDENCES:
