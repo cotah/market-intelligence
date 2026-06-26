@@ -5,10 +5,14 @@ Graceful degradation: sem chave ou em caso de erro, retorna lista vazia.
 
 import httpx
 
+from core import summarize
 from core.config import settings
 from core.logging_config import get_logger
 
 log = get_logger("integrations.serper")
+
+# Acima disso, o conteudo dos snippets somados e resumido antes de seguir.
+_CONDENSE_THRESHOLD = 2000
 
 _API_URL = "https://google.serper.dev/search"
 _TIMEOUT = 30.0
@@ -39,6 +43,14 @@ async def google_search(query: str, num_results: int = 10) -> list[dict]:
                 }
                 for item in data.get("organic", [])
             ]
+
+            # Se o conteudo somado dos snippets for grande, condensa em uma
+            # unica entrada-resumo (mantem o contrato list[dict] dos agentes).
+            combined = "\n".join(f"{r['title']}: {r['snippet']}" for r in results)
+            if len(combined) > _CONDENSE_THRESHOLD:
+                summary = await summarize.condense(combined, source="serper")
+                results = [{"title": "Resumo da pesquisa", "link": "", "snippet": summary}]
+
             log.info("serper.completed", results_count=len(results))
             return results
     except Exception as e:  # noqa: BLE001 - degradacao graciosa

@@ -6,6 +6,7 @@ vazia e loga o motivo, em vez de quebrar o agente.
 
 import httpx
 
+from core import summarize
 from core.config import settings
 from core.logging_config import get_logger
 
@@ -42,11 +43,10 @@ async def search(query: str, focus: str = "internet") -> str:
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
-            # Limita o retorno: respostas muito longas estouravam o prompt do
-            # Claude (400). 3000 chars sao suficientes para os agentes.
-            content = content[:3000]
             log.info("perplexity.completed", chars=len(content))
-            return content
+            # Em vez de truncar o texto cru (perde info no meio), condensamos:
+            # o Claude resume so o que importa, mantendo info densa e prompt curto.
+            return await summarize.condense(content, source="perplexity")
     except Exception as e:  # noqa: BLE001 - degradacao graciosa
         log.error("perplexity.failed", error=str(e))
         return ""

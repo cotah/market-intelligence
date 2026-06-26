@@ -5,6 +5,7 @@ Graceful degradation: sem chave ou em caso de erro, retorna string vazia.
 
 import httpx
 
+from core import summarize
 from core.config import settings
 from core.logging_config import get_logger
 
@@ -42,7 +43,8 @@ async def search_x(query: str) -> str:
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
             log.info("grok.completed", chars=len(content))
-            return content
+            # Condensa se vier longo, para manter o prompt dos agentes curto.
+            return await summarize.condense(content, source="grok")
     except Exception as e:  # noqa: BLE001 - degradacao graciosa
         log.error("grok.failed", error=str(e))
         return ""
