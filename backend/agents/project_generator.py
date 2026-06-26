@@ -73,7 +73,11 @@ Generate a complete launch plan. Return JSON:
 }}"""
 
         try:
-            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1500)
+            # Plano completo (BMC + MVP + roadmap de 90 dias) e grande de
+            # proposito: truncar um plano de negocio e pior do que truncar uma
+            # lista de competidores. A recuperacao de JSON parcial no parser
+            # protege contra quebra se ainda assim estourar.
+            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=2500)
         except Exception as e:  # noqa: BLE001
             log.error("project_generator.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
             return AgentResult(success=False, data={}, error=str(e))
