@@ -73,7 +73,7 @@ Generate a complete launch plan. Return JSON:
 }}"""
 
         try:
-            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=2500)
+            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1500)
         except Exception as e:  # noqa: BLE001
             log.error("project_generator.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
             return AgentResult(success=False, data={}, error=str(e))

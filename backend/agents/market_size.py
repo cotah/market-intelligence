@@ -51,7 +51,7 @@ Return JSON:
 }}"""
 
         try:
-            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1800)
+            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1500)
         except Exception as e:  # noqa: BLE001
             log.error("market_size.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
             return AgentResult(success=False, data={}, error=str(e))

@@ -48,6 +48,8 @@ Map the competitors based on the research below.
 RESEARCH:
 {sources}
 
+List AT MOST 5 competitors (only the 5 most relevant). Keep each field short.
+
 Return JSON:
 {{
   "competitors": [
@@ -57,16 +59,36 @@ Return JSON:
   "saturation": "low | medium | high"
 }}"""
 
+        # max_tokens menor + no maximo 5 competidores => JSON curto, que nao
+        # estoura o limite e nao quebra no parse.
         try:
-            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=2000)
+            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1500)
         except Exception as e:  # noqa: BLE001
-            log.error("competitor_hunter.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
-            return AgentResult(success=False, data={}, error=str(e))
+            # Concorrencia e insumo do Scorer, nao filtro: mesmo se o parse
+            # falhar de vez, seguimos com um resultado VAZIO mas valido em vez
+            # de parar o topico.
+            log.warning(
+                "competitor_hunter.empty_fallback",
+                topic=topic,
+                error=str(e),
+                traceback=traceback.format_exc(),
+            )
+            data = {"competitors": [], "gaps": []}
+
+        # Normaliza a forma e limita a 5 competidores (o parser pode ter salvo
+        # um JSON parcial; aqui garantimos shape consistente para os agentes
+        # seguintes).
+        if not isinstance(data, dict):
+            data = {"competitors": [], "gaps": []}
+        data.setdefault("competitors", [])
+        data.setdefault("gaps", [])
+        if isinstance(data["competitors"], list):
+            data["competitors"] = data["competitors"][:5]
 
         log.info(
             "competitor_hunter.completed",
             topic=topic,
-            competitors=len(data.get("competitors", [])) if isinstance(data, dict) else 0,
+            competitors=len(data["competitors"]) if isinstance(data["competitors"], list) else 0,
         )
         return AgentResult(success=True, data=data)
 

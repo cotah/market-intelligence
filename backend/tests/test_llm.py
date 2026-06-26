@@ -30,6 +30,24 @@ def test_extract_json_invalid_raises():
         _extract_json("no json here at all")
 
 
+def test_extract_json_repairs_truncated_object():
+    # Resposta cortada pelo max_tokens no meio do 2o competidor.
+    truncated = '{"competitors": [{"name": "A", "pricing": "$10"}, {"name": "B"'
+    data = _extract_json(truncated)
+    assert isinstance(data, dict)
+    # Salva pelo menos o 1o competidor, que veio completo.
+    assert data["competitors"][0]["name"] == "A"
+    assert len(data["competitors"]) >= 1
+
+
+def test_extract_json_repairs_truncated_array():
+    truncated = '[{"x": 1}, {"x": 2}, {"x": 3'
+    data = _extract_json(truncated)
+    assert isinstance(data, list)
+    assert data[0]["x"] == 1
+    assert len(data) >= 2
+
+
 def test_founder_profile_text_has_key_info():
     text = get_profile_as_text()
     assert "Henrique" in text

@@ -118,10 +118,55 @@ async def ask(
             ) from openai_err
 
 
+def _repair_truncated_json(s: str) -> str | None:
+    """Repara um JSON truncado (cortado no meio pelo max_tokens) fechando as
+    estruturas abertas.
+
+    Caminha o texto rastreando aspas e a pilha de colchetes/chaves e guarda o
+    ultimo ponto SEGURO: logo apos um delimitador ',' '}' ']', onde o elemento
+    anterior ja esta completo. No fim, corta nesse ponto e fecha o que ficou
+    aberto, salvando os itens que vieram inteiros. Retorna a string reparada
+    ou None se nao houver nada salvavel.
+    """
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    safe_cut: int | None = None
+    safe_stack: tuple[str, ...] = ()
+
+    for i, ch in enumerate(s):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if not stack:
+                return None
+            stack.pop()
+            safe_cut, safe_stack = i + 1, tuple(stack)
+        elif ch == ",":
+            safe_cut, safe_stack = i, tuple(stack)
+
+    if safe_cut is None:
+        return None
+    repaired = s[:safe_cut].rstrip().rstrip(",").rstrip()
+    return repaired + "".join(reversed(safe_stack))
+
+
 def _extract_json(text: str) -> Any:
     """Extrai o primeiro objeto/array JSON de um texto de LLM.
 
-    Lida com blocos ```json ... ``` e com texto extra antes/depois.
+    Lida com blocos ```json ... ``` e com texto extra antes/depois. Se a
+    resposta veio truncada (max_tokens), tenta salvar o maior prefixo valido.
     """
     fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     candidate = fence.group(1).strip() if fence else text.strip()
@@ -135,7 +180,27 @@ def _extract_json(text: str) -> Any:
     start = min((i for i in (candidate.find("{"), candidate.find("[")) if i != -1), default=-1)
     end = max(candidate.rfind("}"), candidate.rfind("]"))
     if start != -1 and end != -1 and end > start:
-        return json.loads(candidate[start : end + 1])
+        try:
+            return json.loads(candidate[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    # Ultima tentativa: JSON truncado no meio (resposta cortada pelo max_tokens).
+    # Recupera o maior prefixo valido fechando as estruturas abertas.
+    if start != -1:
+        repaired = _repair_truncated_json(candidate[start:])
+        if repaired is not None:
+            try:
+                data = json.loads(repaired)
+                log.warning(
+                    "llm.json.repaired",
+                    reason="resposta provavelmente truncada pelo max_tokens",
+                    original_chars=len(candidate),
+                    repaired_chars=len(repaired),
+                )
+                return data
+            except json.JSONDecodeError:
+                pass
 
     raise LLMException(f"Resposta do LLM nao continha JSON valido: {text[:200]}")
 
