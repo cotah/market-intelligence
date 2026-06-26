@@ -23,9 +23,25 @@ log = get_logger("llm")
 _anthropic: AsyncAnthropic | None = None
 _openai: AsyncOpenAI | None = None
 
-# Em um 400 do Claude (prompt grande demais), tentamos de novo com o prompt
-# cortado a este tamanho antes de cair para a OpenAI.
-_MAX_RETRY_PROMPT_CHARS = 3000
+# Cap proativo do prompt enviado ao Claude (evita o 400 por excesso de conteudo).
+_MAX_PROMPT_CHARS = 4000
+# Em um 400 do Claude, tentamos de novo com o prompt cortado a este tamanho
+# (mais agressivo) antes de cair para a OpenAI.
+_MAX_RETRY_PROMPT_CHARS = 2000
+
+
+def _cap_prompt(prompt: str, max_chars: int) -> str:
+    """Limita o prompt mantendo INICIO e FIM.
+
+    As instrucoes de formato (ex.: "Return JSON: {...}") costumam ficar no fim
+    do prompt; o conteudo externo volumoso fica no miolo. Por isso cortamos o
+    meio, preservando o comeco e o fim, em vez de truncar o prompt inteiro.
+    """
+    if len(prompt) <= max_chars:
+        return prompt
+    head = int(max_chars * 0.7)
+    tail = max_chars - head
+    return prompt[:head] + "\n...[conteudo cortado]...\n" + prompt[-tail:]
 
 
 def _is_bad_request(err: Exception) -> bool:
@@ -107,23 +123,34 @@ async def ask(
     system: str = "",
     max_tokens: int = 2000,
     temperature: float = 0.3,
+    cap_chars: int | None = _MAX_PROMPT_CHARS,
 ) -> str:
     """Pergunta ao LLM. Claude primeiro; OpenAI como fallback.
 
-    Lanca LLMException se ambos falharem.
+    `cap_chars` limita proativamente o prompt (default _MAX_PROMPT_CHARS) para
+    evitar o 400 do Claude. Passe `cap_chars=None` para nao limitar (ex.: o
+    sumarizador, que precisa ver o texto inteiro). Lanca LLMException se ambos
+    falharem.
     """
+    if cap_chars:
+        prompt = _cap_prompt(prompt, cap_chars)
+
     try:
         result = await _ask_anthropic(prompt, system, max_tokens, temperature)
         log.info("llm.answered", provider="anthropic")
         return result
     except Exception as anthropic_err:  # noqa: BLE001 - queremos cair para o fallback
-        log.warning("llm.anthropic_failed", error=str(anthropic_err))
+        log.warning(
+            "llm.anthropic_failed",
+            error=str(anthropic_err),
+            status=getattr(anthropic_err, "status_code", None),
+        )
 
         # 400 do Claude costuma ser prompt+contexto grande demais. Antes de cair
-        # para a OpenAI, tentamos UMA vez com o prompt cortado nos primeiros
-        # _MAX_RETRY_PROMPT_CHARS chars.
+        # para a OpenAI, tentamos UMA vez com o prompt cortado de forma mais
+        # agressiva (preservando inicio e fim).
         if _is_bad_request(anthropic_err) and len(prompt) > _MAX_RETRY_PROMPT_CHARS:
-            truncated = prompt[:_MAX_RETRY_PROMPT_CHARS]
+            truncated = _cap_prompt(prompt, _MAX_RETRY_PROMPT_CHARS)
             log.warning(
                 "llm.anthropic_retry_truncated",
                 original_chars=len(prompt),

@@ -42,6 +42,9 @@ async def search(query: str, focus: str = "internet") -> str:
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
+            # Limita o retorno: respostas muito longas estouravam o prompt do
+            # Claude (400). 3000 chars sao suficientes para os agentes.
+            content = content[:3000]
             log.info("perplexity.completed", chars=len(content))
             return content
     except Exception as e:  # noqa: BLE001 - degradacao graciosa
