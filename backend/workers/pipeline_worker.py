@@ -5,6 +5,7 @@ um engine/sessao novos dentro de cada execucao e usamos asyncio.run().
 """
 
 import asyncio
+import traceback
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -39,14 +40,29 @@ async def _with_session(fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
 @celery.task(name="workers.pipeline_worker.run_pipeline_once_task", bind=True)
 def run_pipeline_once_task(self) -> dict:
     """Executa uma unica rodada da pipeline agora."""
-    log.info("worker.run_once.started", task_id=self.request.id)
+    # PRIMEIRO log, antes de qualquer await/asyncio.run: confirma que o worker
+    # realmente PEGOU a task (e em qual fila chegou), nao so que foi enfileirada.
+    delivery = getattr(self.request, "delivery_info", {}) or {}
+    log.info(
+        "worker.run_once.received",
+        task_id=self.request.id,
+        queue=delivery.get("routing_key"),
+    )
     try:
+        log.info("worker.run_once.started", task_id=self.request.id)
         summary = asyncio.run(_with_session(pipeline.run_once))
         pipeline_control.set_status({"last_task_id": self.request.id, **summary})
         log.info("worker.run_once.completed", **{k: v for k, v in summary.items() if k != "opportunity_ids"})
         return summary
     except Exception as e:  # noqa: BLE001
-        log.error("worker.run_once.failed", error=str(e))
+        # traceback explicito: garante que um erro silencioso fique visivel
+        # mesmo com o JSONRenderer (que nao formata exc_info sozinho).
+        log.error(
+            "worker.run_once.failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            traceback=traceback.format_exc(),
+        )
         raise
 
 
@@ -60,6 +76,10 @@ def scheduled_run(self) -> dict | None:
     ao mesmo tempo. Ao terminar, se ainda habilitada, ja enfileira a proxima
     rodada — e assim a pipeline roda continuamente ate o Stop.
     """
+    # PRIMEIRO log, antes de qualquer await: confirma que o worker pegou a task.
+    delivery = getattr(self.request, "delivery_info", {}) or {}
+    log.info("worker.scheduled.received", task_id=self.request.id, queue=delivery.get("routing_key"))
+
     if not pipeline_control.is_enabled():
         log.info("worker.scheduled.skipped", reason="pipeline_disabled")
         return None
@@ -78,6 +98,15 @@ def scheduled_run(self) -> dict | None:
             **{k: v for k, v in summary.items() if k != "opportunity_ids"},
         )
         return summary
+    except Exception as e:  # noqa: BLE001
+        # Erro silencioso vira visivel (com traceback), mesmo no JSONRenderer.
+        log.error(
+            "worker.scheduled.failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            traceback=traceback.format_exc(),
+        )
+        raise
     finally:
         pipeline_control.release_run_lock()
         # Modo continuo: se ainda habilitada, ja agenda a proxima rodada.
