@@ -7,6 +7,7 @@ raciocinio que envolva texto livre.
 
 import json
 import re
+import traceback
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -106,7 +107,12 @@ async def ask(
             log.info("llm.answered", provider="openai")
             return result
         except Exception as openai_err:  # noqa: BLE001
-            log.error("llm.all_failed", anthropic_error=str(anthropic_err), openai_error=str(openai_err))
+            log.error(
+                "llm.all_failed",
+                anthropic_error=str(anthropic_err),
+                openai_error=str(openai_err),
+                traceback=traceback.format_exc(),
+            )
             raise LLMException(
                 f"Claude e OpenAI falharam. Claude: {anthropic_err} | OpenAI: {openai_err}"
             ) from openai_err
@@ -145,4 +151,15 @@ async def ask_json(
         system + "\n\nResponda APENAS com JSON valido, sem texto extra."
     ).strip()
     raw = await ask(prompt, system=full_system, max_tokens=max_tokens, temperature=temperature)
-    return _extract_json(raw)
+    # Loga o que o LLM realmente devolveu ANTES do parse: se o parse falhar,
+    # ja temos o preview aqui (e o agente loga o traceback). Isto e o ponto
+    # cego que escondia "API chamada com sucesso mas nada salvo".
+    log.info("llm.json.raw", chars=len(raw), preview=raw[:500])
+    data = _extract_json(raw)
+    log.info(
+        "llm.json.parsed",
+        kind=type(data).__name__,
+        keys=list(data.keys()) if isinstance(data, dict) else None,
+        length=len(data) if isinstance(data, list) else None,
+    )
+    return data

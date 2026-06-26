@@ -31,6 +31,9 @@ async def _with_session(fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
         async with session_factory() as session:
             result = await fn(session)
             await session.commit()
+            # Confirma que o commit ocorreu: se este log NAO aparecer mas os
+            # logs dos agentes aparecerem, houve rollback (excecao antes daqui).
+            log.info("worker.session.committed")
         return result
     finally:
         await engine.dispose()

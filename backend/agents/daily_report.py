@@ -8,6 +8,7 @@ Excelentes:  score_total >= MIN_SCORE_FOR_PROJECT_PLAN.
 """
 
 import json
+import traceback
 from datetime import date, datetime, time
 
 from sqlalchemy import select
@@ -99,7 +100,7 @@ Plain text, no JSON."""
         try:
             return await llm.ask(prompt, system=_SYSTEM, max_tokens=600, temperature=0.4)
         except Exception as e:  # noqa: BLE001 - relatorio nao deve quebrar por falha de LLM
-            log.warning("daily_report.summary_failed", error=str(e))
+            log.warning("daily_report.summary_failed", error=str(e), traceback=traceback.format_exc())
             return (
                 f"{total} oportunidades analisadas em {day.isoformat()}. "
                 f"{len(promising)} promissoras, {len(excellent)} excelentes. "

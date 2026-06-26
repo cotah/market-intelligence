@@ -4,6 +4,8 @@ Estima TAM, SAM e SOM usando dados publicos (Perplexity) + raciocinio do
 LLM. Retorna numeros com fonte e crescimento anual estimado.
 """
 
+import traceback
+
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
 from core.logging_config import get_logger
@@ -51,7 +53,7 @@ Return JSON:
         try:
             data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1800)
         except Exception as e:  # noqa: BLE001
-            log.error("market_size.failed", topic=topic, error=str(e))
+            log.error("market_size.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
             return AgentResult(success=False, data={}, error=str(e))
 
         log.info("market_size.completed", topic=topic)

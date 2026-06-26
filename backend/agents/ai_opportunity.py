@@ -5,6 +5,7 @@ com justificativa e qual parte da solucao a IA executa.
 """
 
 import json
+import traceback
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
@@ -44,7 +45,7 @@ Can AI (LLMs, automation, ML) solve this problem? Return JSON:
         try:
             data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1200)
         except Exception as e:  # noqa: BLE001
-            log.error("ai_opportunity.failed", topic=topic, error=str(e))
+            log.error("ai_opportunity.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
             return AgentResult(success=False, data={}, error=str(e))
 
         log.info("ai_opportunity.completed", topic=topic, verdict=data.get("verdict") if isinstance(data, dict) else None)

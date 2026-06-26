@@ -15,6 +15,7 @@ Criterio de descarte: total < MIN_SCORE_TO_KEEP (default 6.0).
 """
 
 import json
+import traceback
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
@@ -68,7 +69,7 @@ Score each dimension from 0 to 10. Return JSON with EXACTLY these keys:
         try:
             raw = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1200)
         except Exception as e:  # noqa: BLE001
-            log.error("scorer.failed", topic=topic, error=str(e))
+            log.error("scorer.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
             return AgentResult(
                 success=False,
                 should_discard=True,

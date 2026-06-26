@@ -7,6 +7,8 @@ para extrair frases de dor ("I hate", "I wish", "Why doesn't", ...).
 Criterio de descarte: menos de 3 evidencias de dor real -> descarta.
 """
 
+import traceback
+
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
 from core.config import settings
@@ -66,7 +68,12 @@ Only include pain_phrases that are backed by the discussions above."""
             data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1800, temperature=0.2)
         except Exception as e:
             # Falha de LLM nao deve derrubar a pipeline inteira: descartamos com motivo.
-            log.error("problem_hunter.failed", topic=topic, error=str(e))
+            log.error(
+                "problem_hunter.failed",
+                topic=topic,
+                error=str(e),
+                traceback=traceback.format_exc(),
+            )
             return AgentResult(
                 success=False,
                 should_discard=True,
@@ -88,6 +95,7 @@ Only include pain_phrases that are backed by the discussions above."""
             problems=problems_count,
             has_real_pain=has_real_pain,
             min_required=_MIN_PAIN_EVIDENCES,
+            raw_preview=str(data)[:800],
         )
 
         # 3. Criterio de descarte.

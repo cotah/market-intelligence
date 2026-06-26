@@ -7,6 +7,7 @@ Criterio de descarte: compatibilidade < 50%.
 """
 
 import json
+import traceback
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
@@ -81,7 +82,7 @@ Evaluate fit for THIS founder. Return JSON:
             data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1200)
         except Exception as e:  # noqa: BLE001
             # Sem avaliacao de fit nao da para seguir com confianca: descarta com motivo.
-            log.error("founder_compatibility.failed", topic=topic, error=str(e))
+            log.error("founder_compatibility.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
             return AgentResult(
                 success=False,
                 should_discard=True,

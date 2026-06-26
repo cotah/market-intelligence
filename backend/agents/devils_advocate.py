@@ -6,6 +6,7 @@ com severidade. Nao descarta (informa, evita paixao cega).
 """
 
 import json
+import traceback
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
@@ -47,7 +48,7 @@ Try to KILL this idea. Return JSON:
         try:
             data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1500)
         except Exception as e:  # noqa: BLE001
-            log.error("devils_advocate.failed", topic=topic, error=str(e))
+            log.error("devils_advocate.failed", topic=topic, error=str(e), traceback=traceback.format_exc())
             return AgentResult(success=False, data={}, error=str(e))
 
         log.info(

@@ -144,7 +144,20 @@ class Pipeline:
         )
 
         for agent in self.agents:
+            log.info("pipeline.agent.running", topic=topic_name, agent=agent.name)
             result = await agent.run(context)
+
+            # Resultado de CADA agente: passou, descartou ou falhou, e se trouxe
+            # dado. E aqui que se ve onde o topico parou de progredir.
+            log.info(
+                "pipeline.agent.result",
+                topic=topic_name,
+                agent=agent.name,
+                success=result.success,
+                should_discard=result.should_discard,
+                has_data=bool(result.data),
+                error=result.error or None,
+            )
 
             # Persiste o dado do agente no campo correspondente.
             field = _AGENT_FIELD_MAP.get(agent.name)

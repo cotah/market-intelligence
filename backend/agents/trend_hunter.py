@@ -8,6 +8,7 @@ Funciona mesmo se uma integracao falhar (graceful degradation): se
 nenhuma fonte responder, ainda pedimos topicos ao LLM com o que houver.
 """
 
+import traceback
 from datetime import date
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
@@ -72,8 +73,17 @@ Return a JSON object with this exact shape:
         try:
             data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=2000, temperature=0.4)
         except Exception as e:
-            log.error("trend_hunter.failed", error=str(e))
+            log.error("trend_hunter.failed", error=str(e), traceback=traceback.format_exc())
             raise AgentException(f"TrendHunter failed to consolidate topics: {e}") from e
+
+        # Loga a forma EXATA do que o LLM devolveu, para flagrar quando o JSON
+        # vem certo mas sem a chave "topics" (ou com outro formato).
+        log.info(
+            "trend_hunter.llm_result",
+            result_type=type(data).__name__,
+            keys=list(data.keys()) if isinstance(data, dict) else None,
+            raw_preview=str(data)[:800],
+        )
 
         topics = data.get("topics", []) if isinstance(data, dict) else []
         topic_names = [t.get("name", "?") for t in topics if isinstance(t, dict)]
