@@ -68,8 +68,13 @@ async def test_problem_hunter_discards_gracefully_on_llm_error(monkeypatch, patc
     monkeypatch.setattr(ph.llm, "ask_json", boom)
 
     result = await ProblemHunterAgent().run(_ctx())
+    # Apos o fix: uma falha de LLM nao quebra com erro cru. Cai para um
+    # resultado vazio mas valido (success=True) e o criterio normal descarta
+    # por falta de evidencia de dor.
     assert result.should_discard is True
-    assert result.success is False
+    assert result.success is True
+    assert "evidencia" in result.discard_reason.lower()
+    assert result.data["pain_phrases"] == []
 
 
 # ------------------------------ Trend Hunter ------------------------------

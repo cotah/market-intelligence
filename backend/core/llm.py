@@ -23,6 +23,22 @@ log = get_logger("llm")
 _anthropic: AsyncAnthropic | None = None
 _openai: AsyncOpenAI | None = None
 
+# Em um 400 do Claude (prompt grande demais), tentamos de novo com o prompt
+# cortado a este tamanho antes de cair para a OpenAI.
+_MAX_RETRY_PROMPT_CHARS = 3000
+
+
+def _is_bad_request(err: Exception) -> bool:
+    """True se o erro do Claude for um HTTP 400 (Bad Request).
+
+    O SDK da Anthropic expoe `status_code` nas excecoes de API; usamos isso
+    como sinal primario e caimos para uma checagem textual por seguranca.
+    """
+    if getattr(err, "status_code", None) == 400:
+        return True
+    text = str(err).lower()
+    return "400" in text and "bad request" in text
+
 
 def _get_anthropic() -> AsyncAnthropic | None:
     global _anthropic
@@ -102,6 +118,24 @@ async def ask(
         return result
     except Exception as anthropic_err:  # noqa: BLE001 - queremos cair para o fallback
         log.warning("llm.anthropic_failed", error=str(anthropic_err))
+
+        # 400 do Claude costuma ser prompt+contexto grande demais. Antes de cair
+        # para a OpenAI, tentamos UMA vez com o prompt cortado nos primeiros
+        # _MAX_RETRY_PROMPT_CHARS chars.
+        if _is_bad_request(anthropic_err) and len(prompt) > _MAX_RETRY_PROMPT_CHARS:
+            truncated = prompt[:_MAX_RETRY_PROMPT_CHARS]
+            log.warning(
+                "llm.anthropic_retry_truncated",
+                original_chars=len(prompt),
+                truncated_chars=len(truncated),
+            )
+            try:
+                result = await _ask_anthropic(truncated, system, max_tokens, temperature)
+                log.info("llm.answered", provider="anthropic", truncated=True)
+                return result
+            except Exception as retry_err:  # noqa: BLE001 - segue para o fallback
+                log.warning("llm.anthropic_retry_failed", error=str(retry_err))
+
         try:
             result = await _ask_openai(prompt, system, max_tokens, temperature)
             log.info("llm.answered", provider="openai")

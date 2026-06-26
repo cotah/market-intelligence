@@ -62,29 +62,38 @@ Return a JSON object with this exact shape:
   "has_real_pain": true
 }}
 
+List AT MOST 10 pain_phrases (the strongest ones). Keep each phrase short.
 Only include pain_phrases that are backed by the discussions above."""
 
+        # max_tokens menor + no maximo 10 frases => JSON curto, que nao estoura
+        # o limite e nao quebra no parse.
         try:
-            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1800, temperature=0.2)
+            data = await llm.ask_json(prompt, system=_SYSTEM, max_tokens=1500, temperature=0.2)
         except Exception as e:
-            # Falha de LLM nao deve derrubar a pipeline inteira: descartamos com motivo.
-            log.error(
-                "problem_hunter.failed",
+            # Mesmo se o parse falhar de vez, nao quebramos com erro cru: seguimos
+            # com um resultado VAZIO mas valido. Sem evidencias, o criterio normal
+            # abaixo descarta com motivo claro ("sem dor real suficiente").
+            log.warning(
+                "problem_hunter.empty_fallback",
                 topic=topic,
                 error=str(e),
                 traceback=traceback.format_exc(),
             )
-            return AgentResult(
-                success=False,
-                should_discard=True,
-                discard_reason=f"Problem Hunter falhou ao analisar dores: {e}",
-                error=str(e),
-            )
+            data = {"pain_phrases": [], "problems": [], "sources": [], "has_real_pain": False}
 
-        pain_phrases = data.get("pain_phrases", []) if isinstance(data, dict) else []
+        # Normaliza a forma (o parser pode ter salvo um JSON parcial) e limita as
+        # frases de dor a 10, para os agentes seguintes terem shape consistente.
+        if not isinstance(data, dict):
+            data = {"pain_phrases": [], "problems": [], "sources": [], "has_real_pain": False}
+        pain_phrases = data.get("pain_phrases", [])
+        if not isinstance(pain_phrases, list):
+            pain_phrases = []
+        pain_phrases = pain_phrases[:10]
+        data["pain_phrases"] = pain_phrases
+
         evidence_count = len(pain_phrases)
-        problems_count = len(data.get("problems", [])) if isinstance(data, dict) else 0
-        has_real_pain = bool(data.get("has_real_pain")) if isinstance(data, dict) else False
+        problems_count = len(data.get("problems", [])) if isinstance(data.get("problems"), list) else 0
+        has_real_pain = bool(data.get("has_real_pain"))
 
         # Log explicito: mostra se o Problem Hunter realmente achou dor, quantas
         # evidencias e quantos problemas, antes de aplicar o criterio de descarte.

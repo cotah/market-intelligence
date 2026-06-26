@@ -4,7 +4,7 @@ import pytest
 
 from core.founder_profile import get_profile_as_text
 from core.exceptions import LLMException
-from core.llm import _extract_json
+from core.llm import _extract_json, _is_bad_request
 
 
 def test_extract_json_plain():
@@ -46,6 +46,26 @@ def test_extract_json_repairs_truncated_array():
     assert isinstance(data, list)
     assert data[0]["x"] == 1
     assert len(data) >= 2
+
+
+def test_is_bad_request_detects_status_code():
+    class FakeApiError(Exception):
+        status_code = 400
+
+    assert _is_bad_request(FakeApiError("boom")) is True
+
+
+def test_is_bad_request_detects_text():
+    assert _is_bad_request(Exception("HTTP/1.1 400 Bad Request")) is True
+
+
+def test_is_bad_request_false_for_other_errors():
+    assert _is_bad_request(Exception("connection timeout")) is False
+
+    class FakeApiError(Exception):
+        status_code = 429
+
+    assert _is_bad_request(FakeApiError("rate limit")) is False
 
 
 def test_founder_profile_text_has_key_info():
