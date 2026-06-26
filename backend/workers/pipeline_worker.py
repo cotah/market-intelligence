@@ -50,16 +50,43 @@ def run_pipeline_once_task(self) -> dict:
         raise
 
 
-@celery.task(name="workers.pipeline_worker.scheduled_run")
-def scheduled_run() -> dict | None:
-    """Disparada pelo beat. So roda se a pipeline estiver habilitada."""
+@celery.task(name="workers.pipeline_worker.scheduled_run", bind=True)
+def scheduled_run(self) -> dict | None:
+    """Rodada do modo continuo.
+
+    Disparada pelo Start (1a rodada), pelo watchdog do Beat e pelo
+    auto-encadeamento (cada rodada enfileira a proxima). So roda se a pipeline
+    estiver habilitada e usa uma trava no Redis para nunca rodar duas rodadas
+    ao mesmo tempo. Ao terminar, se ainda habilitada, ja enfileira a proxima
+    rodada — e assim a pipeline roda continuamente ate o Stop.
+    """
     if not pipeline_control.is_enabled():
         log.info("worker.scheduled.skipped", reason="pipeline_disabled")
         return None
-    log.info("worker.scheduled.running")
-    summary = asyncio.run(_with_session(pipeline.run_once))
-    pipeline_control.set_status({"trigger": "scheduled", **summary})
-    return summary
+
+    # Evita rodadas sobrepostas (auto-encadeamento + watchdog do Beat).
+    if not pipeline_control.acquire_run_lock():
+        log.info("worker.scheduled.skipped", reason="already_running")
+        return None
+
+    try:
+        log.info("worker.scheduled.running", task_id=self.request.id)
+        summary = asyncio.run(_with_session(pipeline.run_once))
+        pipeline_control.set_status({"trigger": "scheduled", "task_id": self.request.id, **summary})
+        log.info(
+            "worker.scheduled.completed",
+            **{k: v for k, v in summary.items() if k != "opportunity_ids"},
+        )
+        return summary
+    finally:
+        pipeline_control.release_run_lock()
+        # Modo continuo: se ainda habilitada, ja agenda a proxima rodada.
+        if pipeline_control.is_enabled():
+            gap = settings.pipeline_continuous_gap_seconds
+            scheduled_run.apply_async(countdown=gap)
+            log.info("worker.scheduled.rechained", gap_seconds=gap)
+        else:
+            log.info("worker.scheduled.stopped", reason="pipeline_disabled")
 
 
 # ----------------------------- Daily Report ------------------------------

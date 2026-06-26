@@ -29,7 +29,14 @@ class Settings(BaseSettings):
     reddit_client_secret: str = ""
 
     # --- Pipeline ---
-    pipeline_interval_seconds: int = 3600
+    # No modo continuo a pipeline se auto-encadeia (ao terminar uma rodada
+    # ja inicia a proxima). Por isso `pipeline_interval_seconds` deixa de ser
+    # "1x por hora" e passa a ser apenas o watchdog do Celery Beat: de quanto
+    # em quanto tempo o beat verifica se a cadeia morreu e a religa.
+    pipeline_interval_seconds: int = 300
+    # Intervalo entre uma rodada e a proxima no modo continuo (0 = imediato).
+    # Um valor pequeno evita um loop apertado que martela as APIs externas.
+    pipeline_continuous_gap_seconds: int = 5
     pipeline_topics_per_run: int = 5
     min_score_to_keep: float = 6.0
     min_score_for_project_plan: float = 8.0

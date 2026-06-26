@@ -118,9 +118,32 @@ async def generate_daily_report() -> PipelineActionOut:
 # ------------------------------ Pipeline --------------------------------
 @router.post("/pipeline/start", response_model=PipelineActionOut)
 async def start_pipeline() -> PipelineActionOut:
+    """Liga o modo continuo e ja inicia a primeira rodada.
+
+    A partir daqui cada rodada se auto-encadeia (workers.pipeline_worker.
+    scheduled_run) ate o Stop. Nao esperamos o Beat para comecar.
+    """
     ok = pipeline_control.set_enabled(True)
-    msg = "Pipeline habilitada." if ok else "Falha ao habilitar (Redis indisponivel)."
-    return PipelineActionOut(ok=ok, message=msg)
+    if not ok:
+        return PipelineActionOut(ok=False, message="Falha ao habilitar (Redis indisponivel).")
+
+    # Dispara a primeira rodada imediatamente; as proximas se auto-encadeiam.
+    try:
+        from workers.pipeline_worker import scheduled_run
+
+        task = scheduled_run.delay()
+        return PipelineActionOut(
+            ok=True,
+            message="Pipeline ligada em modo continuo. Primeira rodada iniciada.",
+            task_id=str(task.id),
+        )
+    except Exception as e:  # noqa: BLE001
+        # O flag ja esta ligado; o watchdog do Beat iniciara a cadeia em breve.
+        log.error("api.start_pipeline.enqueue_failed", error=str(e))
+        return PipelineActionOut(
+            ok=True,
+            message="Pipeline ligada, mas nao consegui iniciar a 1a rodada agora (worker offline?). O Beat iniciara em breve.",
+        )
 
 
 @router.post("/pipeline/stop", response_model=PipelineActionOut)
