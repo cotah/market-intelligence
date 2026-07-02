@@ -295,6 +295,8 @@ Todo agente, antes de começar a trabalhar, consulta essa tabela. Isso resolve o
 
 **Prioridade:** P0 — isso é a base que faz a empresa funcionar como empresa, e não como um monte de scripts soltos.
 
+**Implementado em 02/07/2026:** projeto Supabase dedicado criado separadamente de qualquer produto, especificamente para o Company Brain. URL: https://bybocxguyoejfdhlszpo.supabase.co. Tabelas `company_brain` e `brand_context` já criadas via SQL, com seed inicial do SmartTap. Credencial salva no n8n como 'Capivarex Brain Supabase'.
+
 ### 12.2 Orquestração (n8n)
 Já é a ferramenta certa — só precisa crescer de "4 workflows soltos" pra "1 workflow master + sub-workflows por departamento".
 
