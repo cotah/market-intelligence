@@ -153,11 +153,18 @@ async def test_founder_compatibility_keeps_high(monkeypatch):
 
 # --------------------------- Project Generator ---------------------------
 async def test_project_generator_skips_when_score_below_8(monkeypatch):
+    # O pulo por score baixo e comportamento esperado, mas NUNCA pode ficar
+    # invisivel: o resultado carrega um marcador explicito com o motivo,
+    # para o relatorio nao mostrar "sem dados" como se fosse falha.
     ctx = _ctx()
     ctx.score_data = {"total": 7.5}
     result = await ProjectGeneratorAgent().run(ctx)
     assert result.success is True
-    assert result.data == {}  # pulado -> pipeline nao grava project_plan
+    assert result.should_discard is False
+    assert result.data["skipped"] is True
+    assert result.data["score"] == 7.5
+    assert result.data["min_required"] == 8.0
+    assert "7.5" in result.data["reason"]
 
 
 async def test_project_generator_runs_when_score_high(monkeypatch):

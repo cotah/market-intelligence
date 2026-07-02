@@ -4,8 +4,9 @@ Ativado apenas quando score >= MIN_SCORE_FOR_PROJECT_PLAN (default 8.0).
 Gera plano completo: Business Model Canvas, features do MVP, stack
 recomendada, roadmap de 90 dias e estimativa de custo inicial.
 
-Se o score for menor que o minimo, retorna data vazia (a pipeline nao
-grava nada em project_plan) e registra que foi pulado.
+Se o score for menor que o minimo, retorna um marcador explicito de skip
+({"skipped": true, "reason": ...}) que a pipeline grava em project_plan —
+assim o relatorio mostra "pulado por score" em vez de "sem dados".
 """
 
 import json
@@ -35,8 +36,22 @@ class ProjectGeneratorAgent(BaseAgent):
 
         if total < settings.min_score_for_project_plan:
             log.info("project_generator.skipped", topic=topic, total=total)
-            # data vazia => pipeline nao grava project_plan.
-            return AgentResult(success=True, data={})
+            # Pulo por design, mas NUNCA invisivel: o marcador vai para
+            # project_plan e o relatorio mostra o motivo em vez de "sem dados"
+            # (que se confunde com falha).
+            minimum = settings.min_score_for_project_plan
+            return AgentResult(
+                success=True,
+                data={
+                    "skipped": True,
+                    "score": total,
+                    "min_required": minimum,
+                    "reason": (
+                        f"Score {total} abaixo do minimo {minimum} — "
+                        "plano nao gerado (comportamento esperado)."
+                    ),
+                },
+            )
 
         log.info("project_generator.started", topic=topic, total=total)
 
