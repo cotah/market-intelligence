@@ -42,6 +42,27 @@ _AGENT_FIELD_MAP: dict[str, str] = {
 }
 
 
+def _compute_risk_flag(da_data: dict) -> str | None:
+    """Regra deterministica da Opcao A: 2+ fatal flaws OU 3+ riscos "high".
+
+    Retorna "high" quando o selo "Aprovado com ressalvas" deve ser aplicado,
+    None caso contrario. Thresholds ajustaveis via Settings.
+    """
+    fatal_flaws = da_data.get("fatal_flaws") or []
+    risks = da_data.get("risks") or []
+    high_risks = sum(
+        1
+        for r in risks
+        if isinstance(r, dict) and str(r.get("severity", "")).lower() == "high"
+    )
+    if (
+        len(fatal_flaws) >= settings.risk_flag_min_fatal_flaws
+        or high_risks >= settings.risk_flag_min_high_risks
+    ):
+        return "high"
+    return None
+
+
 class Pipeline:
     def __init__(self) -> None:
         self.trend_hunter = TrendHunterAgent()
@@ -178,6 +199,22 @@ class Pipeline:
             # Atualiza score_total se o scorer rodou.
             if agent.name == "scorer" and result.data:
                 opp.score_total = result.data.get("total")
+
+            # Opcao A (docs/PROPOSTA_SCORER_DEVILS_ADVOCATE.md): se o Devil's
+            # Advocate encontra riscos demais, a aprovacao ganha o selo
+            # "com ressalvas" em score_data.risk_flag — a nota nunca muda.
+            if agent.name == "devils_advocate" and result.data and opp.score_data:
+                flag = _compute_risk_flag(result.data)
+                if flag:
+                    # Dict novo (nao mutacao) para o JSONB ser marcado como dirty.
+                    opp.score_data = {**opp.score_data, "risk_flag": flag}
+                    context.score_data = opp.score_data
+                    log.info(
+                        "pipeline.risk_flag.applied",
+                        topic=topic_name,
+                        flag=flag,
+                        fatal_flaws=len(result.data.get("fatal_flaws") or []),
+                    )
 
             if not result.success:
                 failed_agents.append({"agent": agent.name, "error": result.error})

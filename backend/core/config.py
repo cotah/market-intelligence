@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     pipeline_topics_per_run: int = 5
     min_score_to_keep: float = 6.0
     min_score_for_project_plan: float = 8.0
+    # Selo "Aprovado com ressalvas" (Opcao A, docs/PROPOSTA_SCORER_DEVILS_
+    # ADVOCATE.md): thresholds do Devil's Advocate que ativam o risk_flag.
+    # A nota NUNCA muda — apenas o selo.
+    risk_flag_min_fatal_flaws: int = 2
+    risk_flag_min_high_risks: int = 3
 
     # --- App ---
     environment: str = "development"

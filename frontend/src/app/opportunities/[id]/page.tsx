@@ -56,6 +56,14 @@ export default function OpportunityDetailPage() {
             <h1 className="text-2xl font-semibold text-zinc-100">{opp.title}</h1>
             <div className="flex flex-wrap items-center gap-3">
               <StatusBadge status={opp.status} />
+              {opp.status === "completed" && opp.score_data?.risk_flag === "high" && (
+                <span
+                  className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-400"
+                  title="O Devil's Advocate encontrou riscos relevantes (fatal flaws / severidade alta)"
+                >
+                  Com ressalvas
+                </span>
+              )}
               <span className="text-xs text-zinc-500">
                 Origem: {opp.topic_origin} · {formatDate(opp.created_at)}
               </span>

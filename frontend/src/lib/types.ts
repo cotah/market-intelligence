@@ -11,6 +11,8 @@ export interface ScoreData {
   ai_potential?: number;
   profit?: number;
   reasoning?: string;
+  // "high" quando o Devil's Advocate achou riscos demais (Aprovado com ressalvas).
+  risk_flag?: string;
   [key: string]: unknown;
 }
 

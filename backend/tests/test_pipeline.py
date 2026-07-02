@@ -106,6 +106,27 @@ async def test_process_topic_discard_stops_chain():
     assert opp.monetization_data is None
 
 
+async def test_project_generator_skip_marker_is_persisted_in_project_plan():
+    # Score 6.0-7.9: o Project Generator e pulado POR DESIGN, mas o motivo
+    # precisa chegar ao banco (project_plan) em vez de virar "sem dados".
+    # Nada falhou, entao o status permanece COMPLETED (nao PARTIAL).
+    scorer = FakeAgent("scorer", _ok({"total": 7.0}))
+    skip_marker = {
+        "skipped": True,
+        "score": 7.0,
+        "min_required": 8.0,
+        "reason": "Score 7.0 abaixo do minimo 8.0 — plano nao gerado (comportamento esperado).",
+    }
+    generator = FakeAgent("project_generator", _ok(skip_marker))
+    p = _pipeline_with([scorer, generator])
+
+    opp = await p._process_topic(FakeSession(), TOPIC)
+
+    assert opp.status == OpportunityStatus.COMPLETED
+    assert not opp.failed_agents
+    assert opp.project_plan == skip_marker  # visivel no relatorio, nao NULL
+
+
 async def test_scorer_sets_score_total():
     scorer = FakeAgent("scorer", _ok({"total": 8.7, "market": 9}))
     p = _pipeline_with([scorer])
@@ -114,6 +135,64 @@ async def test_scorer_sets_score_total():
 
     assert opp.score_total == 8.7
     assert opp.score_data == {"total": 8.7, "market": 9}
+
+
+# ------------- Opcao A: selo "Aprovado com ressalvas" (pos-DA) -------------
+# docs/PROPOSTA_SCORER_DEVILS_ADVOCATE.md: se o Devil's Advocate lista
+# 2+ fatal flaws OU 3+ riscos "high", score_data ganha risk_flag="high".
+# A NOTA NUNCA MUDA — so o selo.
+
+
+async def test_devils_advocate_fatal_flaws_set_risk_flag_without_changing_score():
+    scorer = FakeAgent("scorer", _ok({"total": 7.0, "market": 8}))
+    da = FakeAgent(
+        "devils_advocate",
+        _ok({"fatal_flaws": ["too generic", "incumbents crush it"], "risks": []}),
+    )
+    p = _pipeline_with([scorer, da])
+
+    opp = await p._process_topic(FakeSession(), TOPIC)
+
+    assert opp.status == OpportunityStatus.COMPLETED
+    assert opp.score_data["risk_flag"] == "high"
+    assert opp.score_total == 7.0  # nota intacta
+    assert opp.score_data["total"] == 7.0
+
+
+async def test_devils_advocate_many_high_risks_set_risk_flag():
+    scorer = FakeAgent("scorer", _ok({"total": 7.5}))
+    da = FakeAgent(
+        "devils_advocate",
+        _ok({
+            "fatal_flaws": [],
+            "risks": [
+                {"risk": "a", "severity": "high"},
+                {"risk": "b", "severity": "high"},
+                {"risk": "c", "severity": "HIGH"},  # case-insensitive
+                {"risk": "d", "severity": "low"},
+            ],
+        }),
+    )
+    p = _pipeline_with([scorer, da])
+
+    opp = await p._process_topic(FakeSession(), TOPIC)
+
+    assert opp.score_data["risk_flag"] == "high"
+
+
+async def test_devils_advocate_calm_does_not_set_risk_flag():
+    scorer = FakeAgent("scorer", _ok({"total": 7.0}))
+    da = FakeAgent(
+        "devils_advocate",
+        _ok({"fatal_flaws": ["one flaw"], "risks": [{"risk": "a", "severity": "high"}]}),
+    )
+    p = _pipeline_with([scorer, da])
+
+    opp = await p._process_topic(FakeSession(), TOPIC)
+
+    # 1 fatal flaw e 1 risco high: abaixo dos thresholds (2 e 3).
+    assert "risk_flag" not in opp.score_data
+    assert opp.score_total == 7.0
 
 
 # ------------------------------- run_once ---------------------------------
