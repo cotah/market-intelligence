@@ -19,6 +19,7 @@ class OpportunityOut(BaseModel):
     status: OpportunityStatus
     discard_reason: str | None
     discarded_by: str | None
+    failed_agents: list | None
 
     trend_data: dict | None
     problem_data: dict | None

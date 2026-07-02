@@ -87,6 +87,7 @@ class Pipeline:
         summary = {
             "topics": len(topics),
             "completed": 0,
+            "partial": 0,
             "discarded": 0,
             "discards": [],
             "opportunity_ids": [],
@@ -105,6 +106,9 @@ class Pipeline:
                 summary["discards"].append(
                     {"topic": opp.title, "by": opp.discarded_by, "reason": opp.discard_reason}
                 )
+            elif opp.status == OpportunityStatus.PARTIAL:
+                # PARTIAL nunca se esconde dentro de "completed".
+                summary["partial"] += 1
             else:
                 summary["completed"] += 1
 
@@ -114,6 +118,7 @@ class Pipeline:
             "pipeline.run_once.completed",
             topics=summary["topics"],
             completed=summary["completed"],
+            partial=summary["partial"],
             discarded=summary["discarded"],
             discards=summary["discards"],
         )
@@ -143,6 +148,11 @@ class Pipeline:
             founder_profile=profile,
         )
 
+        # Agentes que falharam (success=False): a cadeia continua (graceful
+        # degradation), mas a falha fica registrada e o status final vira
+        # PARTIAL — nunca um COMPLETED com dado faltando em silencio.
+        failed_agents: list[dict] = []
+
         for agent in self.agents:
             log.info("pipeline.agent.running", topic=topic_name, agent=agent.name)
             result = await agent.run(context)
@@ -169,10 +179,22 @@ class Pipeline:
             if agent.name == "scorer" and result.data:
                 opp.score_total = result.data.get("total")
 
+            if not result.success:
+                failed_agents.append({"agent": agent.name, "error": result.error})
+                log.warning(
+                    "pipeline.agent.failed_partial",
+                    topic=topic_name,
+                    agent=agent.name,
+                    error=result.error,
+                )
+
             if result.should_discard:
                 opp.status = OpportunityStatus.DISCARDED
                 opp.discard_reason = result.discard_reason
                 opp.discarded_by = agent.name
+                # Falhas anteriores ficam registradas mesmo no descarte.
+                if failed_agents:
+                    opp.failed_agents = failed_agents
                 log.info(
                     "pipeline.topic.discarded",
                     topic=topic_name,
@@ -186,13 +208,19 @@ class Pipeline:
             # ate onde ele chegou antes de (eventualmente) ser descartado.
             log.info("pipeline.agent.passed", topic=topic_name, agent=agent.name)
 
-        opp.status = OpportunityStatus.COMPLETED
+        if failed_agents:
+            opp.status = OpportunityStatus.PARTIAL
+            opp.failed_agents = failed_agents
+        else:
+            opp.status = OpportunityStatus.COMPLETED
         await session.flush()
         log.info(
             "pipeline.topic.completed",
             topic=topic_name,
             opportunity_id=str(opp.id),
             score_total=opp.score_total,
+            status=opp.status.value,
+            failed_agents=[f["agent"] for f in failed_agents] or None,
         )
         return opp
 

@@ -20,6 +20,9 @@ from models.base import Base
 class OpportunityStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    # Terminou a cadeia, mas com pelo menos um agente falho (dado faltando).
+    # Nunca deve se passar por COMPLETED — veja `failed_agents`.
+    PARTIAL = "partial"
     DISCARDED = "discarded"
 
 
@@ -43,6 +46,9 @@ class Opportunity(Base):
     )
     discard_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     discarded_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Agentes que falharam durante a cadeia: [{"agent": nome, "error": msg}].
+    # Preenchido mesmo em DISCARDED, para rastreabilidade total.
+    failed_agents: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # --- Dados de cada agente (JSONB) ---
     trend_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
