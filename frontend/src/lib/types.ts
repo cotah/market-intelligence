@@ -1,6 +1,6 @@
 // Tipos que espelham as respostas do backend FastAPI.
 
-export type OpportunityStatus = "in_progress" | "completed" | "discarded";
+export type OpportunityStatus = "in_progress" | "completed" | "partial" | "discarded";
 
 export interface ScoreData {
   total?: number;
@@ -35,6 +35,7 @@ export interface Opportunity {
   status: OpportunityStatus;
   discard_reason: string | null;
   discarded_by: string | null;
+  failed_agents: { agent: string; error: string }[] | null;
 
   trend_data: Record<string, unknown> | null;
   problem_data: Record<string, unknown> | null;

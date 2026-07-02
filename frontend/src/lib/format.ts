@@ -36,6 +36,8 @@ export function statusLabel(status: OpportunityStatus): string {
   switch (status) {
     case "completed":
       return "Aprovado";
+    case "partial":
+      return "Parcial";
     case "discarded":
       return "Descartado";
     case "in_progress":
@@ -47,6 +49,8 @@ export function statusBadgeClasses(status: OpportunityStatus): string {
   switch (status) {
     case "completed":
       return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "partial":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
     case "discarded":
       return "bg-rose-500/15 text-rose-400 border-rose-500/30";
     case "in_progress":
