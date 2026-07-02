@@ -51,6 +51,18 @@ class OpportunityListItem(BaseModel):
     created_at: datetime
 
 
+class ResearchOpportunitiesOut(BaseModel):
+    """Resposta da ponte Research Agent (n8n): lote de oportunidades.
+
+    Reaproveita OpportunityOut (mesma estrutura que os 11 agentes produzem).
+    `mock=True` sinaliza resposta simulada (sem tocar no banco).
+    """
+
+    count: int
+    mock: bool
+    opportunities: list[OpportunityOut]
+
+
 class DailyReportOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

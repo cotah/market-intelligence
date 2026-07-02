@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     reddit_client_id: str = ""
     reddit_client_secret: str = ""
 
+    # Chave DEDICADA da ponte Research Agent (n8n) -> busca. Nao reaproveitar
+    # nenhuma outra chave. Vazia = endpoint desabilitado (fail closed, 503).
+    research_api_key: str = ""
+
     # --- Pipeline ---
     # No modo continuo a pipeline se auto-encadeia (ao terminar uma rodada
     # ja inicia a proxima). Por isso `pipeline_interval_seconds` deixa de ser
