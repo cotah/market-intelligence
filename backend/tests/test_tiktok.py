@@ -61,6 +61,61 @@ async def test_search_hashtag_uses_real_data_when_apify_token_present(monkeypatc
     assert results[0]["post_url"] == "https://www.tiktok.com/@user/video/7300000000000000000"
 
 
+async def test_search_hashtag_filters_error_placeholder_items(monkeypatch, httpx_mock):
+    """Hashtag inexistente: o ator devolve UM item-placeholder de erro
+    ({error, errorCode, url da PAGINA DA TAG}) — visto em producao em
+    2026-07-06. Esse item nao pode virar "post real" (post_url de tag
+    quebra o ator de comentarios e polui a evidencia do LLM)."""
+    monkeypatch.setattr(settings, "apify_api_token", "fake_token")
+
+    httpx_mock.add_response(
+        url=(
+            "https://api.apify.com/v2/acts/clockworks~tiktok-hashtag-scraper"
+            "/run-sync-get-dataset-items?token=fake_token"
+        ),
+        method="POST",
+        json=[
+            {
+                "error": "This profile/hashtag does not exist.",
+                "errorCode": "NOT_FOUND",
+                "url": "https://www.tiktok.com/tag/aiagentorchestration",
+                "input": "aiagentorchestration",
+            }
+        ],
+    )
+
+    results = await tiktok.search_hashtag("aiagentorchestration")
+
+    # Sem videos de verdade -> lista vazia honesta (nao placeholder, nao mock).
+    assert results == []
+
+
+async def test_search_hashtag_prefers_web_video_url(monkeypatch, httpx_mock):
+    """Quando o item traz webVideoUrl (URL canonica do video no dataset do
+    clockworks), ela vence o campo generico url."""
+    monkeypatch.setattr(settings, "apify_api_token", "fake_token")
+
+    httpx_mock.add_response(
+        url=(
+            "https://api.apify.com/v2/acts/clockworks~tiktok-hashtag-scraper"
+            "/run-sync-get-dataset-items?token=fake_token"
+        ),
+        method="POST",
+        json=[
+            {
+                "text": "real video",
+                "diggCount": 10,
+                "webVideoUrl": "https://www.tiktok.com/@user/video/111",
+                "url": "https://www.tiktok.com/tag/something",
+            }
+        ],
+    )
+
+    results = await tiktok.search_hashtag("something")
+
+    assert results[0]["post_url"] == "https://www.tiktok.com/@user/video/111"
+
+
 async def test_search_hashtag_falls_back_to_mock_when_apify_fails(monkeypatch, httpx_mock):
     monkeypatch.setattr(settings, "apify_api_token", "fake_token")
 

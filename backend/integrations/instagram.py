@@ -92,7 +92,9 @@ async def _search_real(hashtag: str) -> list[dict] | None:
             "is_mock": False,
         }
         for item in items
-        if isinstance(item, dict)
+        # Guard defensivo (mesmo padrao do TikTok): item-placeholder de erro
+        # ({error, errorCode}) do ator nao e um post — fica de fora.
+        if isinstance(item, dict) and "error" not in item and "errorCode" not in item
     ][:_MAX_RESULTS]
 
 

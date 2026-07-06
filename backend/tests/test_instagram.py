@@ -63,6 +63,33 @@ async def test_search_hashtag_uses_real_data_when_apify_token_present(monkeypatc
     assert results[0]["post_url"] == "https://www.instagram.com/p/ABC123/"
 
 
+async def test_search_hashtag_filters_error_placeholder_items(monkeypatch, httpx_mock):
+    """Guard defensivo (simetria com o TikTok): se o ator devolver um
+    item-placeholder de erro ({error, errorCode}), ele nao pode virar
+    "post real" na pipeline."""
+    monkeypatch.setattr(settings, "apify_api_token", "fake_token")
+
+    httpx_mock.add_response(
+        url=(
+            "https://api.apify.com/v2/acts/breathtaking_anthem~instagram-hashtag-posts-scraper"
+            "/run-sync-get-dataset-items?token=fake_token"
+        ),
+        method="POST",
+        json=[
+            {
+                "error": "This hashtag does not exist.",
+                "errorCode": "NOT_FOUND",
+                "url": "https://www.instagram.com/explore/tags/aiagentorchestration/",
+            }
+        ],
+    )
+
+    results = await instagram.search_hashtag("aiagentorchestration")
+
+    # Sem posts de verdade -> lista vazia honesta (nao placeholder, nao mock).
+    assert results == []
+
+
 async def test_search_hashtag_falls_back_to_mock_when_apify_fails(monkeypatch, httpx_mock):
     monkeypatch.setattr(settings, "apify_api_token", "fake_token")
 

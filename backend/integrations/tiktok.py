@@ -74,11 +74,15 @@ async def _search_real(hashtag: str) -> list[dict] | None:
             "description": (item.get("text") or "")[:1000],
             "likes": item.get("diggCount", 0),
             "hashtag": hashtag,
-            "post_url": item.get("url", ""),
+            # webVideoUrl e a URL canonica do video no dataset do clockworks;
+            # "url" pode ser so a pagina da tag.
+            "post_url": item.get("webVideoUrl") or item.get("url", ""),
             "is_mock": False,
         }
         for item in items
-        if isinstance(item, dict)
+        # Hashtag inexistente: o ator devolve um item-placeholder com
+        # {error, errorCode} — nao e um video, entao fica de fora.
+        if isinstance(item, dict) and "error" not in item and "errorCode" not in item
     ]
 
 
