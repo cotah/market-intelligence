@@ -17,6 +17,7 @@ from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
 from core.exceptions import AgentException
 from core.logging_config import get_logger
+from core.text import to_hashtag
 from integrations import google_trends, grok, hackernews, perplexity, serper
 
 log = get_logger("agents.trend_hunter")
@@ -73,6 +74,7 @@ Return a JSON object with this exact shape:
   "topics": [
     {{
       "name": "short topic name (e.g. 'AI Receptionist')",
+      "hashtag": "a SHORT, REAL hashtag people actually use on Instagram/TikTok for this topic (e.g. 'aiagents', 'smallbusiness'). Lowercase, letters and digits only, no spaces or symbols. Prefer popular broad hashtags over invented long ones.",
       "growth_signal": "high | medium | low",
       "sources": ["X/Twitter", "Product Hunt", ...],
       "evidence": "one sentence on why this is growing",
@@ -98,7 +100,15 @@ Return a JSON object with this exact shape:
 
         topics = data.get("topics", []) if isinstance(data, dict) else []
 
-        # 3. Validacao com dado real do Google Trends (quando disponivel).
+        # 3. Normaliza a hashtag de cada topico (o LLM pode mandar "#", caixa
+        # alta ou simbolos); se faltar, deriva do name sanitizado. E ela que o
+        # problem_hunter usa nas buscas de Instagram/TikTok.
+        for topic in topics:
+            if not isinstance(topic, dict):
+                continue
+            topic["hashtag"] = to_hashtag(topic.get("hashtag") or topic.get("name") or "")
+
+        # 4. Validacao com dado real do Google Trends (quando disponivel).
         await self._enrich_with_google_trends(topics)
 
         topic_names = [t.get("name", "?") for t in topics if isinstance(t, dict)]

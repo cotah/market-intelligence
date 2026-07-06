@@ -19,6 +19,7 @@ from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
 from core.config import settings
 from core.logging_config import get_logger
+from core.text import to_hashtag
 from integrations import app_reviews, instagram, perplexity, reddit, tiktok
 
 log = get_logger("agents.problem_hunter")
@@ -44,7 +45,9 @@ class ProblemHunterAgent(BaseAgent):
         log.info("problem_hunter.started", topic=topic)
 
         # 1. Coleta de evidencias em paralelo (cada fonte degrada sozinha).
-        hashtag = topic.lower().replace(" ", "")
+        # A hashtag vem do LLM do trend_hunter (curta e real); fallback:
+        # topico sanitizado (so alfanumerico — & e hifens quebram os atores).
+        hashtag = (context.trend_data or {}).get("hashtag") or to_hashtag(topic)
         raw = await asyncio.gather(
             perplexity.search(
                 f"What are the most common complaints, frustrations and unmet needs people have about '{topic}'? "

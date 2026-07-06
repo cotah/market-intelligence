@@ -119,8 +119,10 @@ async def test_problem_hunter_discards_gracefully_on_llm_error(monkeypatch, patc
     assert result.data["pain_phrases"] == []
 
 
-async def test_problem_hunter_normalizes_topic_into_hashtag(monkeypatch, patch_problem_sources):
-    """Hashtag para Instagram/TikTok = topico lowercase e sem espacos."""
+async def test_problem_hunter_uses_hashtag_from_trend_data(monkeypatch, patch_problem_sources):
+    """A hashtag escolhida pelo LLM do trend_hunter (trend_data) vence a
+    derivada do topico. Correcao raiz da validacao de 2026-07-06: topicos
+    longos viravam hashtags inexistentes."""
     import agents.problem_hunter as ph
 
     async def fake_ask_json(*args, **kwargs):
@@ -128,10 +130,31 @@ async def test_problem_hunter_normalizes_topic_into_hashtag(monkeypatch, patch_p
 
     monkeypatch.setattr(ph.llm, "ask_json", fake_ask_json)
 
-    await ProblemHunterAgent().run(_ctx("AI Receptionist"))
+    ctx = PipelineContext(
+        topic="AI Agent Orchestration Infrastructure",
+        opportunity_id="test-id",
+        trend_data={"name": "AI Agent Orchestration Infrastructure", "hashtag": "aiagents"},
+    )
+    await ProblemHunterAgent().run(ctx)
 
-    assert patch_problem_sources["instagram_hashtag"] == "aireceptionist"
-    assert patch_problem_sources["tiktok_hashtag"] == "aireceptionist"
+    assert patch_problem_sources["instagram_hashtag"] == "aiagents"
+    assert patch_problem_sources["tiktok_hashtag"] == "aiagents"
+
+
+async def test_problem_hunter_falls_back_to_sanitized_topic_hashtag(monkeypatch, patch_problem_sources):
+    """Sem hashtag no trend_data, deriva do topico sanitizado (lowercase,
+    so alfanumerico — sem & e hifens que quebravam os atores da Apify)."""
+    import agents.problem_hunter as ph
+
+    async def fake_ask_json(*args, **kwargs):
+        return {"pain_phrases": ["a", "b", "c", "d"], "problems": [], "sources": [], "has_real_pain": True}
+
+    monkeypatch.setattr(ph.llm, "ask_json", fake_ask_json)
+
+    await ProblemHunterAgent().run(_ctx("AI-Powered Supply Chain Prediction"))
+
+    assert patch_problem_sources["instagram_hashtag"] == "aipoweredsupplychainprediction"
+    assert patch_problem_sources["tiktok_hashtag"] == "aipoweredsupplychainprediction"
     assert patch_problem_sources["reviews_app_id"] == "123456"
 
 
@@ -299,6 +322,40 @@ async def test_trend_hunter_discover_topics(patch_trend_sources):
     result = await TrendHunterAgent().discover_topics(limit=3)
     assert "topics" in result
     assert result["topics"][0]["name"] == "AI Receptionist"
+
+
+async def test_trend_hunter_normalizes_llm_hashtag(monkeypatch, patch_trend_sources):
+    """O LLM devolve "hashtag" por topico; normalizamos pos-LLM (strip #,
+    lowercase, so alfanumerico)."""
+    import agents.trend_hunter as th
+
+    async def fake_ask_json(*args, **kwargs):
+        return {
+            "topics": [
+                {
+                    "name": "AI Receptionist",
+                    "hashtag": "#AI-Receptionist",
+                    "growth_signal": "medium",
+                    "sources": ["X/Twitter"],
+                    "evidence": "...",
+                    "search_volume_trend": "unknown",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(th.llm, "ask_json", fake_ask_json)
+
+    result = await TrendHunterAgent().discover_topics(limit=3)
+
+    assert result["topics"][0]["hashtag"] == "aireceptionist"
+
+
+async def test_trend_hunter_backfills_hashtag_from_name(patch_trend_sources):
+    """Se o LLM esquecer o campo hashtag, derivamos do name sanitizado
+    (o fixture patch_trend_sources nao inclui hashtag no JSON do LLM)."""
+    result = await TrendHunterAgent().discover_topics(limit=3)
+
+    assert result["topics"][0]["hashtag"] == "aireceptionist"
 
 
 async def test_trend_hunter_keeps_llm_estimate_when_trends_unavailable(patch_trend_sources):
