@@ -17,8 +17,12 @@ def _ctx(topic: str = "AI Receptionist") -> PipelineContext:
 # ----------------------------- Problem Hunter -----------------------------
 @pytest.fixture
 def patch_problem_sources(monkeypatch):
-    """Mocka Perplexity e Reddit do Problem Hunter."""
+    """Mocka todas as fontes do Problem Hunter (Perplexity, Reddit,
+    Instagram, TikTok, App Reviews). Retorna um dict `calls` que registra
+    os argumentos passados a cada fonte, para os testes inspecionarem."""
     import agents.problem_hunter as ph
+
+    calls: dict = {}
 
     async def fake_perplexity(query, focus="internet"):
         return "Users complain a lot about this."
@@ -26,8 +30,29 @@ def patch_problem_sources(monkeypatch):
     async def fake_reddit(subreddit, query):
         return [{"title": "I hate X", "body": "...", "upvotes": 10, "subreddit": "all", "is_mock": True}]
 
+    async def fake_instagram(hashtag):
+        calls["instagram_hashtag"] = hashtag
+        return [{"caption": "so annoying #pain", "likes": 10, "hashtag": hashtag, "is_mock": True}]
+
+    async def fake_tiktok(hashtag):
+        calls["tiktok_hashtag"] = hashtag
+        return [{"description": "this is broken", "likes": 99, "hashtag": hashtag, "is_mock": True}]
+
+    async def fake_find_app(topic):
+        calls["find_app_topic"] = topic
+        return {"app_id": "123456", "name": "Some App"}
+
+    async def fake_get_reviews(app_id):
+        calls["reviews_app_id"] = app_id
+        return [{"title": "Buggy", "body": "It crashes", "rating": 2, "is_mock": True}]
+
     monkeypatch.setattr(ph.perplexity, "search", fake_perplexity)
     monkeypatch.setattr(ph.reddit, "search_reddit", fake_reddit)
+    monkeypatch.setattr(ph.instagram, "search_hashtag", fake_instagram)
+    monkeypatch.setattr(ph.tiktok, "search_hashtag", fake_tiktok)
+    monkeypatch.setattr(ph.app_reviews, "find_app", fake_find_app)
+    monkeypatch.setattr(ph.app_reviews, "get_reviews", fake_get_reviews)
+    return calls
 
 
 async def test_problem_hunter_discards_with_few_evidences(monkeypatch, patch_problem_sources):
@@ -77,8 +102,86 @@ async def test_problem_hunter_discards_gracefully_on_llm_error(monkeypatch, patc
     assert result.data["pain_phrases"] == []
 
 
+async def test_problem_hunter_normalizes_topic_into_hashtag(monkeypatch, patch_problem_sources):
+    """Hashtag para Instagram/TikTok = topico lowercase e sem espacos."""
+    import agents.problem_hunter as ph
+
+    async def fake_ask_json(*args, **kwargs):
+        return {"pain_phrases": ["a", "b", "c", "d"], "problems": [], "sources": [], "has_real_pain": True}
+
+    monkeypatch.setattr(ph.llm, "ask_json", fake_ask_json)
+
+    await ProblemHunterAgent().run(_ctx("AI Receptionist"))
+
+    assert patch_problem_sources["instagram_hashtag"] == "aireceptionist"
+    assert patch_problem_sources["tiktok_hashtag"] == "aireceptionist"
+    assert patch_problem_sources["reviews_app_id"] == "123456"
+
+
+async def test_problem_hunter_skips_app_reviews_when_no_app_found(monkeypatch, patch_problem_sources):
+    """Sem app na App Store para o topico -> pula a fonte, nao quebra."""
+    import agents.problem_hunter as ph
+
+    async def fake_find_app(topic):
+        return None
+
+    async def fake_ask_json(*args, **kwargs):
+        return {"pain_phrases": ["a", "b", "c", "d"], "problems": [], "sources": [], "has_real_pain": True}
+
+    monkeypatch.setattr(ph.app_reviews, "find_app", fake_find_app)
+    monkeypatch.setattr(ph.llm, "ask_json", fake_ask_json)
+
+    result = await ProblemHunterAgent().run(_ctx())
+
+    assert result.success is True
+    assert "reviews_app_id" not in patch_problem_sources
+
+
+async def test_problem_hunter_survives_new_sources_failing(monkeypatch, patch_problem_sources):
+    """Instagram/TikTok/App Reviews explodindo nao derruba o agente."""
+    import agents.problem_hunter as ph
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("source down")
+
+    async def fake_ask_json(*args, **kwargs):
+        return {"pain_phrases": ["a", "b", "c", "d"], "problems": [], "sources": [], "has_real_pain": True}
+
+    monkeypatch.setattr(ph.instagram, "search_hashtag", boom)
+    monkeypatch.setattr(ph.tiktok, "search_hashtag", boom)
+    monkeypatch.setattr(ph.app_reviews, "find_app", boom)
+    monkeypatch.setattr(ph.llm, "ask_json", fake_ask_json)
+
+    result = await ProblemHunterAgent().run(_ctx())
+
+    assert result.success is True
+    assert result.should_discard is False
+
+
+def test_problem_hunter_formats_new_evidence_blocks():
+    """Instagram, TikTok e App Reviews viram blocos proprios na evidencia."""
+    evidence = ProblemHunterAgent._format_evidence(
+        perplexity_text="",
+        reddit_posts=[],
+        instagram_posts=[{"caption": "ugh, so hard", "likes": 42, "hashtag": "x", "is_mock": False}],
+        tiktok_posts=[{"description": "nothing works", "likes": 7, "hashtag": "x", "is_mock": False}],
+        app_name="Invoice Maker Pro",
+        reviews=[{"title": "Crashes", "body": "loses my data", "rating": 1, "is_mock": False}],
+    )
+
+    assert "[Instagram]" in evidence
+    assert "ugh, so hard" in evidence
+    assert "[TikTok]" in evidence
+    assert "nothing works" in evidence
+    assert "[App Store reviews - Invoice Maker Pro]" in evidence
+    assert "loses my data" in evidence
+
+
 # ------------------------------ Trend Hunter ------------------------------
-async def test_trend_hunter_discover_topics(monkeypatch):
+@pytest.fixture
+def patch_trend_sources(monkeypatch):
+    """Mocka todas as fontes do Trend Hunter. Google Trends comeca
+    retornando None (mantem estimativa do LLM); os testes sobrescrevem."""
     import agents.trend_hunter as th
 
     async def fake_serper(query, num_results=10):
@@ -90,17 +193,83 @@ async def test_trend_hunter_discover_topics(monkeypatch):
     async def fake_perplexity(query, focus="internet"):
         return "Product Hunt is full of AI scheduling tools."
 
+    async def fake_hackernews(limit=10):
+        return [{"title": "Show HN: AI receptionist", "score": 512, "url": "http://x", "num_comments": 231, "is_mock": False}]
+
+    async def fake_trend_score(keyword):
+        return None
+
     async def fake_ask_json(*args, **kwargs):
-        return {"topics": [{"name": "AI Receptionist", "growth_signal": "high", "sources": ["X/Twitter"], "evidence": "...", "search_volume_trend": "increasing"}]}
+        return {"topics": [{"name": "AI Receptionist", "growth_signal": "medium", "sources": ["X/Twitter"], "evidence": "...", "search_volume_trend": "unknown"}]}
 
     monkeypatch.setattr(th.serper, "google_search", fake_serper)
     monkeypatch.setattr(th.grok, "search_x", fake_grok)
     monkeypatch.setattr(th.perplexity, "search", fake_perplexity)
+    monkeypatch.setattr(th.hackernews, "get_top_stories", fake_hackernews)
+    monkeypatch.setattr(th.google_trends, "get_trend_score", fake_trend_score)
     monkeypatch.setattr(th.llm, "ask_json", fake_ask_json)
 
+
+async def test_trend_hunter_discover_topics(patch_trend_sources):
     result = await TrendHunterAgent().discover_topics(limit=3)
     assert "topics" in result
     assert result["topics"][0]["name"] == "AI Receptionist"
+
+
+async def test_trend_hunter_keeps_llm_estimate_when_trends_unavailable(patch_trend_sources):
+    """get_trend_score -> None mantem o achismo do LLM intacto."""
+    result = await TrendHunterAgent().discover_topics(limit=3)
+
+    topic = result["topics"][0]
+    assert topic["growth_signal"] == "medium"
+    assert topic["search_volume_trend"] == "unknown"
+    assert "Google Trends" not in topic["sources"]
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected_trend", "expected_signal"),
+    [
+        ("rising", "increasing", "high"),
+        ("stable", "stable", "medium"),
+        ("falling", "decreasing", "low"),
+    ],
+)
+async def test_trend_hunter_google_trends_overrides_llm_estimate(
+    monkeypatch, patch_trend_sources, direction, expected_trend, expected_signal
+):
+    """Dado real do Google Trends sobrescreve a estimativa do LLM."""
+    import agents.trend_hunter as th
+
+    async def fake_trend_score(keyword):
+        return {
+            "keyword": keyword,
+            "interest_over_time": [{"date": "2026-06-01", "value": 50}],
+            "trend_direction": direction,
+            "is_mock": False,
+        }
+
+    monkeypatch.setattr(th.google_trends, "get_trend_score", fake_trend_score)
+
+    result = await TrendHunterAgent().discover_topics(limit=3)
+
+    topic = result["topics"][0]
+    assert topic["search_volume_trend"] == expected_trend
+    assert topic["growth_signal"] == expected_signal
+    assert "Google Trends" in topic["sources"]
+
+
+def test_trend_hunter_formats_hackernews_block():
+    """Stories do HN viram bloco proprio nas fontes do LLM."""
+    sources = TrendHunterAgent._format_sources(
+        serper_results=[],
+        grok_text="",
+        ph_text="",
+        hn_stories=[{"title": "Show HN: AI receptionist", "score": 512, "url": "http://x", "num_comments": 231, "is_mock": False}],
+    )
+
+    assert "[Hacker News - top stories]" in sources
+    assert "Show HN: AI receptionist" in sources
+    assert "512" in sources
 
 
 # -------------------------------- Scorer ---------------------------------

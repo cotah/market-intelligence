@@ -1,8 +1,10 @@
 """Agente 1 - Trend Hunter.
 
 Encontra assuntos que estao crescendo agora, combinando Serper (Google),
-Grok (X/Twitter) e Perplexity (Product Hunt, Hacker News), e consolida
-tudo com o LLM em uma lista de 5-10 topicos com sinal de crescimento.
+Grok (X/Twitter), Perplexity (Product Hunt) e Hacker News (API direta),
+e consolida tudo com o LLM em uma lista de 5-10 topicos com sinal de
+crescimento. Depois da consolidacao, o Google Trends valida cada topico
+com dado real de busca (quando disponivel, sobrescreve a estimativa do LLM).
 
 Funciona mesmo se uma integracao falhar (graceful degradation): se
 nenhuma fonte responder, ainda pedimos topicos ao LLM com o que houver.
@@ -15,9 +17,16 @@ from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
 from core.exceptions import AgentException
 from core.logging_config import get_logger
-from integrations import grok, perplexity, serper
+from integrations import google_trends, grok, hackernews, perplexity, serper
 
 log = get_logger("agents.trend_hunter")
+
+# trend_direction do Google Trends -> (search_volume_trend, growth_signal).
+_TREND_MAP = {
+    "rising": ("increasing", "high"),
+    "stable": ("stable", "medium"),
+    "falling": ("decreasing", "low"),
+}
 
 _SYSTEM = (
     "You are a trend analyst that finds emerging business opportunities. "
@@ -42,13 +51,15 @@ class TrendHunterAgent(BaseAgent):
             f"What new tools, problems or product categories are people excited about on X in {month}? "
             "Focus on things that could become a software business."
         )
-        ph_hn_text = await perplexity.search(
-            f"What are the trending products on Product Hunt and top discussions on Hacker News in {month}? "
+        # HN agora vem direto da API oficial; o Perplexity foca so em Product Hunt.
+        ph_text = await perplexity.search(
+            f"What are the trending products on Product Hunt in {month}? "
             "List concrete product categories and emerging needs.",
-            focus="Product Hunt and Hacker News",
+            focus="Product Hunt",
         )
+        hn_stories = await hackernews.get_top_stories(limit=10)
 
-        sources_block = self._format_sources(serper_results, grok_text, ph_hn_text)
+        sources_block = self._format_sources(serper_results, grok_text, ph_text, hn_stories)
 
         # 2. Consolidacao via LLM.
         prompt = f"""Based on the research below, identify {limit} to {min(limit + 5, 10)} business topics/categories
@@ -86,6 +97,10 @@ Return a JSON object with this exact shape:
         )
 
         topics = data.get("topics", []) if isinstance(data, dict) else []
+
+        # 3. Validacao com dado real do Google Trends (quando disponivel).
+        await self._enrich_with_google_trends(topics)
+
         topic_names = [t.get("name", "?") for t in topics if isinstance(t, dict)]
         log.info("trend_hunter.completed", topics_count=len(topics), topics=topic_names)
         if not topics:
@@ -116,7 +131,34 @@ Return a JSON object with this exact shape:
         return AgentResult(success=True, data=match)
 
     @staticmethod
-    def _format_sources(serper_results: list[dict], grok_text: str, ph_hn_text: str) -> str:
+    async def _enrich_with_google_trends(topics: list[dict]) -> None:
+        """Sobrescreve a estimativa do LLM com dado real do Google Trends.
+
+        Sequencial de proposito: a pytrends raspa o Google e chamadas em
+        paralelo aumentam muito a chance de rate limit (429). Topico sem
+        dado real (None) mantem a estimativa do LLM.
+        """
+        for topic in topics:
+            if not isinstance(topic, dict) or not topic.get("name"):
+                continue
+            score = await google_trends.get_trend_score(topic["name"])
+            if not score:
+                continue
+            mapped = _TREND_MAP.get(score.get("trend_direction", ""))
+            if not mapped:
+                continue
+            topic["search_volume_trend"], topic["growth_signal"] = mapped
+            sources = topic.setdefault("sources", [])
+            if "Google Trends" not in sources:
+                sources.append("Google Trends")
+
+    @staticmethod
+    def _format_sources(
+        serper_results: list[dict],
+        grok_text: str,
+        ph_text: str,
+        hn_stories: list[dict],
+    ) -> str:
         parts: list[str] = []
 
         if serper_results:
@@ -128,8 +170,16 @@ Return a JSON object with this exact shape:
         if grok_text:
             parts.append(f"[X / Twitter via Grok]\n{grok_text}")
 
-        if ph_hn_text:
-            parts.append(f"[Product Hunt / Hacker News via Perplexity]\n{ph_hn_text}")
+        if ph_text:
+            parts.append(f"[Product Hunt via Perplexity]\n{ph_text}")
+
+        if hn_stories:
+            lines = "\n".join(
+                f"- ({s['score']} points, {s['num_comments']} comments) {s['title']}"
+                for s in hn_stories
+                if s.get("title")
+            )
+            parts.append(f"[Hacker News - top stories]\n{lines}")
 
         if not parts:
             return "(No external sources responded. Use your general knowledge of current tech/business trends.)"

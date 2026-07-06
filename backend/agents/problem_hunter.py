@@ -1,19 +1,24 @@
 """Agente 2 - Problem Hunter.
 
 Para um topico vindo do Trend Hunter, busca evidencias de dor real:
-Perplexity (Quora, foruns, reviews) + Reddit (mock). Depois pede ao LLM
+Perplexity (Quora, foruns, reviews), Reddit, Instagram, TikTok e reviews
+da App Store (app mais relevante via iTunes Search). Depois pede ao LLM
 para extrair frases de dor ("I hate", "I wish", "Why doesn't", ...).
+
+As fontes rodam em paralelo (actors do Apify levam 10-45s cada) e cada
+uma falha individualmente sem derrubar o agente.
 
 Criterio de descarte: menos de 3 evidencias de dor real -> descarta.
 """
 
+import asyncio
 import traceback
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
 from core.config import settings
 from core.logging_config import get_logger
-from integrations import perplexity, reddit
+from integrations import app_reviews, instagram, perplexity, reddit, tiktok
 
 log = get_logger("agents.problem_hunter")
 
@@ -33,16 +38,30 @@ class ProblemHunterAgent(BaseAgent):
         topic = context.topic
         log.info("problem_hunter.started", topic=topic)
 
-        # 1. Coleta de evidencias (degrada graciosamente).
-        perplexity_text = await perplexity.search(
-            f"What are the most common complaints, frustrations and unmet needs people have about '{topic}'? "
-            'Include real phrases users say like "I hate", "I wish", "why doesn\'t", "there should be". '
-            "Look at Quora, forums, Amazon reviews, G2 and Trustpilot.",
-            focus="user complaints and reviews",
+        # 1. Coleta de evidencias em paralelo (cada fonte degrada sozinha).
+        hashtag = topic.lower().replace(" ", "")
+        raw = await asyncio.gather(
+            perplexity.search(
+                f"What are the most common complaints, frustrations and unmet needs people have about '{topic}'? "
+                'Include real phrases users say like "I hate", "I wish", "why doesn\'t", "there should be". '
+                "Look at Quora, forums, Amazon reviews, G2 and Trustpilot.",
+                focus="user complaints and reviews",
+            ),
+            reddit.search_reddit(subreddit="all", query=topic),
+            instagram.search_hashtag(hashtag),
+            tiktok.search_hashtag(hashtag),
+            self._fetch_app_reviews(topic),
+            return_exceptions=True,
         )
-        reddit_posts = await reddit.search_reddit(subreddit="all", query=topic)
+        perplexity_text = self._or_default(raw[0], "", "perplexity")
+        reddit_posts = self._or_default(raw[1], [], "reddit")
+        instagram_posts = self._or_default(raw[2], [], "instagram")
+        tiktok_posts = self._or_default(raw[3], [], "tiktok")
+        app_name, reviews = self._or_default(raw[4], ("", []), "app_reviews")
 
-        evidence_block = self._format_evidence(perplexity_text, reddit_posts)
+        evidence_block = self._format_evidence(
+            perplexity_text, reddit_posts, instagram_posts, tiktok_posts, app_name, reviews
+        )
 
         # 2. Extracao de dores via LLM.
         prompt = f"""Topic: "{topic}"
@@ -125,7 +144,34 @@ Only include pain_phrases that are backed by the discussions above."""
         return AgentResult(success=True, data=data)
 
     @staticmethod
-    def _format_evidence(perplexity_text: str, reddit_posts: list[dict]) -> str:
+    def _or_default(value, default, source: str):
+        """Converte excecao de uma fonte em valor default, com aviso."""
+        if isinstance(value, BaseException):
+            log.warning("problem_hunter.source_failed", source=source, error=str(value))
+            return default
+        return value
+
+    @staticmethod
+    async def _fetch_app_reviews(topic: str) -> tuple[str, list[dict]]:
+        """Mapeia topico -> app da App Store e busca as reviews.
+
+        Sem app encontrado -> ("", []) e a fonte e pulada.
+        """
+        app = await app_reviews.find_app(topic)
+        if not app:
+            return ("", [])
+        reviews = await app_reviews.get_reviews(app["app_id"])
+        return (app["name"], reviews)
+
+    @staticmethod
+    def _format_evidence(
+        perplexity_text: str,
+        reddit_posts: list[dict],
+        instagram_posts: list[dict],
+        tiktok_posts: list[dict],
+        app_name: str,
+        reviews: list[dict],
+    ) -> str:
         parts: list[str] = []
 
         if perplexity_text:
@@ -135,8 +181,29 @@ Only include pain_phrases that are backed by the discussions above."""
             lines = "\n".join(
                 f"- ({p['upvotes']} upvotes) {p['title']}: {p['body']}" for p in reddit_posts
             )
-            note = " (MOCK data)" if reddit_posts and reddit_posts[0].get("is_mock") else ""
+            note = " (MOCK data)" if reddit_posts[0].get("is_mock") else ""
             parts.append(f"[Reddit{note}]\n{lines}")
+
+        if instagram_posts:
+            lines = "\n".join(
+                f"- ({p['likes']} likes) {p['caption']}" for p in instagram_posts
+            )
+            note = " (MOCK data)" if instagram_posts[0].get("is_mock") else ""
+            parts.append(f"[Instagram{note}]\n{lines}")
+
+        if tiktok_posts:
+            lines = "\n".join(
+                f"- ({p['likes']} likes) {p['description']}" for p in tiktok_posts
+            )
+            note = " (MOCK data)" if tiktok_posts[0].get("is_mock") else ""
+            parts.append(f"[TikTok{note}]\n{lines}")
+
+        if reviews:
+            lines = "\n".join(
+                f"- ({r['rating']}/5) {r['title']}: {r['body']}" for r in reviews
+            )
+            note = " (MOCK data)" if reviews[0].get("is_mock") else ""
+            parts.append(f"[App Store reviews - {app_name}{note}]\n{lines}")
 
         if not parts:
             return "(No discussions found. If you have no evidence of real pain, set has_real_pain to false and return an empty pain_phrases list.)"
