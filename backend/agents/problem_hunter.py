@@ -1,8 +1,9 @@
 """Agente 2 - Problem Hunter.
 
 Para um topico vindo do Trend Hunter, busca evidencias de dor real:
-Perplexity (Quora, foruns, reviews), Reddit, Instagram, TikTok e reviews
-da App Store (app mais relevante via iTunes Search). Depois pede ao LLM
+Perplexity (Quora, foruns, reviews), Reddit, Instagram, TikTok, reviews
+da App Store (app mais relevante via iTunes Search) e comentarios dos
+top posts de IG/TikTok (Etapa 2 — reacao espontanea). Depois pede ao LLM
 para extrair frases de dor ("I hate", "I wish", "Why doesn't", ...).
 
 As fontes rodam em paralelo (actors do Apify levam 10-45s cada) e cada
@@ -23,6 +24,10 @@ from integrations import app_reviews, instagram, perplexity, reddit, tiktok
 log = get_logger("agents.problem_hunter")
 
 _MIN_PAIN_EVIDENCES = 3
+
+# Etapa 2: de quantos posts (por fonte) buscamos comentarios. Cada busca e um
+# run do Apify (custo!), entao limitamos aos posts com mais likes.
+_COMMENTS_POSTS_PER_SOURCE = 2
 
 _SYSTEM = (
     "You analyze user discussions to find REAL pain points behind a topic. "
@@ -59,8 +64,37 @@ class ProblemHunterAgent(BaseAgent):
         tiktok_posts = self._or_default(raw[3], [], "tiktok")
         app_name, reviews = self._or_default(raw[4], ("", []), "app_reviews")
 
+        # 1b. Etapa 2: comentarios dos top posts (por likes) de IG e TikTok.
+        # Comentario e onde a dor espontanea aparece — mais proximo do Reddit
+        # do que a legenda do post. Tambem em paralelo e com degradacao
+        # individual (um post que falhar vira lista vazia).
+        ig_urls = self._top_post_urls(instagram_posts)
+        tt_urls = self._top_post_urls(tiktok_posts)
+        raw_comments = await asyncio.gather(
+            *[instagram.get_comments(url) for url in ig_urls],
+            *[tiktok.get_comments(url) for url in tt_urls],
+            return_exceptions=True,
+        )
+        instagram_comments = [
+            c
+            for result in raw_comments[: len(ig_urls)]
+            for c in self._or_default(result, [], "instagram_comments")
+        ]
+        tiktok_comments = [
+            c
+            for result in raw_comments[len(ig_urls) :]
+            for c in self._or_default(result, [], "tiktok_comments")
+        ]
+
         evidence_block = self._format_evidence(
-            perplexity_text, reddit_posts, instagram_posts, tiktok_posts, app_name, reviews
+            perplexity_text,
+            reddit_posts,
+            instagram_posts,
+            tiktok_posts,
+            app_name,
+            reviews,
+            instagram_comments=instagram_comments,
+            tiktok_comments=tiktok_comments,
         )
 
         # 2. Extracao de dores via LLM.
@@ -144,6 +178,13 @@ Only include pain_phrases that are backed by the discussions above."""
         return AgentResult(success=True, data=data)
 
     @staticmethod
+    def _top_post_urls(posts: list[dict], limit: int = _COMMENTS_POSTS_PER_SOURCE) -> list[str]:
+        """URLs dos `limit` posts com mais likes (ignora posts sem post_url)."""
+        with_url = [p for p in posts if p.get("post_url")]
+        with_url.sort(key=lambda p: p.get("likes", 0), reverse=True)
+        return [p["post_url"] for p in with_url[:limit]]
+
+    @staticmethod
     def _or_default(value, default, source: str):
         """Converte excecao de uma fonte em valor default, com aviso."""
         if isinstance(value, BaseException):
@@ -171,6 +212,8 @@ Only include pain_phrases that are backed by the discussions above."""
         tiktok_posts: list[dict],
         app_name: str,
         reviews: list[dict],
+        instagram_comments: list[dict] | None = None,
+        tiktok_comments: list[dict] | None = None,
     ) -> str:
         parts: list[str] = []
 
@@ -197,6 +240,22 @@ Only include pain_phrases that are backed by the discussions above."""
             )
             note = " (MOCK data)" if tiktok_posts[0].get("is_mock") else ""
             parts.append(f"[TikTok{note}]\n{lines}")
+
+        # Comentarios de posts especificos: reacao espontanea, a evidencia de
+        # dor mais proxima do Reddit dentre as fontes sociais.
+        if instagram_comments:
+            lines = "\n".join(
+                f"- ({c['likes']} likes) {c['text']}" for c in instagram_comments
+            )
+            note = " (MOCK data)" if instagram_comments[0].get("is_mock") else ""
+            parts.append(f"[Instagram comments{note}]\n{lines}")
+
+        if tiktok_comments:
+            lines = "\n".join(
+                f"- ({c['likes']} likes) {c['text']}" for c in tiktok_comments
+            )
+            note = " (MOCK data)" if tiktok_comments[0].get("is_mock") else ""
+            parts.append(f"[TikTok comments{note}]\n{lines}")
 
         if reviews:
             lines = "\n".join(

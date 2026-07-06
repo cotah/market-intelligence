@@ -32,11 +32,26 @@ def patch_problem_sources(monkeypatch):
 
     async def fake_instagram(hashtag):
         calls["instagram_hashtag"] = hashtag
-        return [{"caption": "so annoying #pain", "likes": 10, "hashtag": hashtag, "is_mock": True}]
+        return [
+            {"caption": "so annoying #pain", "likes": 10, "hashtag": hashtag, "post_url": "https://www.instagram.com/p/A/", "is_mock": True},
+            {"caption": "everyone struggles with this", "likes": 500, "hashtag": hashtag, "post_url": "https://www.instagram.com/p/B/", "is_mock": True},
+            {"caption": "any tool that works?", "likes": 200, "hashtag": hashtag, "post_url": "https://www.instagram.com/p/C/", "is_mock": True},
+        ]
 
     async def fake_tiktok(hashtag):
         calls["tiktok_hashtag"] = hashtag
-        return [{"description": "this is broken", "likes": 99, "hashtag": hashtag, "is_mock": True}]
+        return [
+            {"description": "this is broken", "likes": 99, "hashtag": hashtag, "post_url": "https://www.tiktok.com/@u/video/1", "is_mock": True},
+            {"description": "cant believe there is no fix", "likes": 5, "hashtag": hashtag, "post_url": "https://www.tiktok.com/@u/video/2", "is_mock": True},
+        ]
+
+    async def fake_instagram_comments(post_url):
+        calls.setdefault("instagram_comment_urls", []).append(post_url)
+        return [{"text": "I wish this actually worked", "likes": 3, "post_url": post_url, "is_mock": True}]
+
+    async def fake_tiktok_comments(post_url):
+        calls.setdefault("tiktok_comment_urls", []).append(post_url)
+        return [{"text": "same problem here", "likes": 8, "post_url": post_url, "is_mock": True}]
 
     async def fake_find_app(topic):
         calls["find_app_topic"] = topic
@@ -50,6 +65,8 @@ def patch_problem_sources(monkeypatch):
     monkeypatch.setattr(ph.reddit, "search_reddit", fake_reddit)
     monkeypatch.setattr(ph.instagram, "search_hashtag", fake_instagram)
     monkeypatch.setattr(ph.tiktok, "search_hashtag", fake_tiktok)
+    monkeypatch.setattr(ph.instagram, "get_comments", fake_instagram_comments)
+    monkeypatch.setattr(ph.tiktok, "get_comments", fake_tiktok_comments)
     monkeypatch.setattr(ph.app_reviews, "find_app", fake_find_app)
     monkeypatch.setattr(ph.app_reviews, "get_reviews", fake_get_reviews)
     return calls
@@ -175,6 +192,74 @@ def test_problem_hunter_formats_new_evidence_blocks():
     assert "nothing works" in evidence
     assert "[App Store reviews - Invoice Maker Pro]" in evidence
     assert "loses my data" in evidence
+
+
+async def test_problem_hunter_fetches_comments_for_top_posts(monkeypatch, patch_problem_sources):
+    """Busca comentarios dos 2 posts com mais likes por fonte e poe na evidencia."""
+    import agents.problem_hunter as ph
+
+    captured = {}
+
+    async def fake_ask_json(prompt, **kwargs):
+        captured["prompt"] = prompt
+        return {"pain_phrases": ["a", "b", "c", "d"], "problems": [], "sources": [], "has_real_pain": True}
+
+    monkeypatch.setattr(ph.llm, "ask_json", fake_ask_json)
+
+    await ProblemHunterAgent().run(_ctx())
+
+    # Instagram: top-2 por likes = B (500) e C (200); A (10) fica de fora.
+    assert patch_problem_sources["instagram_comment_urls"] == [
+        "https://www.instagram.com/p/B/",
+        "https://www.instagram.com/p/C/",
+    ]
+    # TikTok tem so 2 posts -> os dois, do mais curtido pro menos.
+    assert patch_problem_sources["tiktok_comment_urls"] == [
+        "https://www.tiktok.com/@u/video/1",
+        "https://www.tiktok.com/@u/video/2",
+    ]
+    # Os comentarios entram no prompt do LLM.
+    assert "I wish this actually worked" in captured["prompt"]
+    assert "same problem here" in captured["prompt"]
+
+
+async def test_problem_hunter_survives_comments_failing(monkeypatch, patch_problem_sources):
+    """get_comments explodindo (IG e TikTok) nao derruba o agente."""
+    import agents.problem_hunter as ph
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("comments source down")
+
+    async def fake_ask_json(*args, **kwargs):
+        return {"pain_phrases": ["a", "b", "c", "d"], "problems": [], "sources": [], "has_real_pain": True}
+
+    monkeypatch.setattr(ph.instagram, "get_comments", boom)
+    monkeypatch.setattr(ph.tiktok, "get_comments", boom)
+    monkeypatch.setattr(ph.llm, "ask_json", fake_ask_json)
+
+    result = await ProblemHunterAgent().run(_ctx())
+
+    assert result.success is True
+    assert result.should_discard is False
+
+
+def test_problem_hunter_formats_comment_blocks():
+    """Comentarios de IG e TikTok viram blocos proprios na evidencia."""
+    evidence = ProblemHunterAgent._format_evidence(
+        perplexity_text="",
+        reddit_posts=[],
+        instagram_posts=[],
+        tiktok_posts=[],
+        app_name="",
+        reviews=[],
+        instagram_comments=[{"text": "I waste hours on this every week", "likes": 57, "post_url": "u1", "is_mock": False}],
+        tiktok_comments=[{"text": "tried 3 tools and gave up", "likes": 11, "post_url": "u2", "is_mock": True}],
+    )
+
+    assert "[Instagram comments]" in evidence
+    assert "(57 likes) I waste hours on this every week" in evidence
+    assert "[TikTok comments (MOCK data)]" in evidence
+    assert "(11 likes) tried 3 tools and gave up" in evidence
 
 
 # ------------------------------ Trend Hunter ------------------------------
