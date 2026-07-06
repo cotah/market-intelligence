@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import require_control_key
 from api.schemas import (
     DailyReportOut,
     FounderProfileSchema,
@@ -69,7 +70,11 @@ async def read_founder_profile(
     return profile_to_dict(profile)
 
 
-@router.put("/founder-profile", response_model=FounderProfileSchema)
+@router.put(
+    "/founder-profile",
+    response_model=FounderProfileSchema,
+    dependencies=[Depends(require_control_key)],
+)
 async def update_founder_profile(
     payload: FounderProfileSchema,
     session: AsyncSession = Depends(get_session),
@@ -102,7 +107,11 @@ async def latest_daily_report(
     return report
 
 
-@router.post("/reports/daily/generate", response_model=PipelineActionOut)
+@router.post(
+    "/reports/daily/generate",
+    response_model=PipelineActionOut,
+    dependencies=[Depends(require_control_key)],
+)
 async def generate_daily_report() -> PipelineActionOut:
     """Gera o relatorio diario sob demanda (enfileira no Celery)."""
     try:
@@ -116,7 +125,11 @@ async def generate_daily_report() -> PipelineActionOut:
 
 
 # ------------------------------ Pipeline --------------------------------
-@router.post("/pipeline/start", response_model=PipelineActionOut)
+@router.post(
+    "/pipeline/start",
+    response_model=PipelineActionOut,
+    dependencies=[Depends(require_control_key)],
+)
 async def start_pipeline() -> PipelineActionOut:
     """Liga o modo continuo e ja inicia a primeira rodada.
 
@@ -146,7 +159,11 @@ async def start_pipeline() -> PipelineActionOut:
         )
 
 
-@router.post("/pipeline/stop", response_model=PipelineActionOut)
+@router.post(
+    "/pipeline/stop",
+    response_model=PipelineActionOut,
+    dependencies=[Depends(require_control_key)],
+)
 async def stop_pipeline() -> PipelineActionOut:
     ok = pipeline_control.set_enabled(False)
     msg = "Pipeline desabilitada." if ok else "Falha ao desabilitar (Redis indisponivel)."
@@ -162,7 +179,11 @@ async def pipeline_status() -> PipelineStatusOut:
     )
 
 
-@router.post("/pipeline/run-once", response_model=PipelineActionOut)
+@router.post(
+    "/pipeline/run-once",
+    response_model=PipelineActionOut,
+    dependencies=[Depends(require_control_key)],
+)
 async def run_pipeline_once() -> PipelineActionOut:
     """Enfileira uma rodada unica no Celery e retorna o id da tarefa.
 

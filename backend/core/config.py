@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # nenhuma outra chave. Vazia = endpoint desabilitado (fail closed, 503).
     research_api_key: str = ""
 
+    # Chave dos endpoints de CONTROLE (ligar/desligar pipeline, editar perfil,
+    # gerar relatorio) — acoes que gastam creditos de LLM ou alteram estado.
+    # O frontend envia via proxy server-side (a chave nunca chega ao browser).
+    # Vazia = endpoints de controle desabilitados (fail closed, 503).
+    control_api_key: str = ""
+
     # --- Pipeline ---
     # No modo continuo a pipeline se auto-encadeia (ao terminar uma rodada
     # ja inicia a proxima). Por isso `pipeline_interval_seconds` deixa de ser
