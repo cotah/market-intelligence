@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     reddit_client_id: str = ""
     reddit_client_secret: str = ""
 
+    # Chave da conta Apify — usada pelas integracoes que rodam scrapers
+    # prontos (Reddit, Instagram, TikTok, App Store) em vez de API oficial.
+    apify_api_token: str = ""
+
     # Chave DEDICADA da ponte Research Agent (n8n) -> busca. Nao reaproveitar
     # nenhuma outra chave. Vazia = endpoint desabilitado (fail closed, 503).
     research_api_key: str = ""
