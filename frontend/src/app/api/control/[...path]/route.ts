@@ -50,9 +50,13 @@ async function proxy(
       body: body || undefined,
       cache: "no-store",
     });
-  } catch {
+  } catch (err) {
+    // Log server-side para diagnostico (nunca inclui a chave).
+    console.error("control-proxy fetch failed:", err);
+    const cause =
+      err instanceof Error ? (err.cause ?? err.message) : String(err);
     return NextResponse.json(
-      { detail: `Nao foi possivel conectar ao backend (${BACKEND_URL})` },
+      { detail: `Nao foi possivel conectar ao backend (${BACKEND_URL}): ${cause}` },
       { status: 502 },
     );
   }
