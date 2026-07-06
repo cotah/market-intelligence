@@ -21,7 +21,7 @@ FOUNDER_PROFILE: dict = {
         ],
     },
     "markets": ["Ireland", "Europe", "Brazil", "Portuguese-speaking markets"],
-    "active_projects": ["SmartTap", "TALOA", "InMyHouses"],
+    "active_projects": ["TALOA", "InMyHouses"],
     "budget_range": "bootstrap",
     # Legado (usado por get_profile_as_text / project_generator).
     "tools_available": [

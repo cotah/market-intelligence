@@ -20,7 +20,7 @@ Cada departamento abaixo tem:
 
 ## 0.1 Regra de arquitetura obrigatória — Edição Granular (não regenerar tudo do zero)
 
-**Adicionado em 02/07/2026, após a experiência real de retrabalho na landing page do SmartTap.**
+**Adicionado em 02/07/2026, após a experiência real de retrabalho na landing page de um produto piloto.**
 
 **O problema que aconteceu:** toda vez que uma imagem ou texto da landing page não ficava bom, o sistema regenerava a página inteira do zero — gastando tokens à toa, arriscando perder partes que já estavam boas, e sem controle real do que mudou.
 
@@ -39,7 +39,7 @@ Isso significa que, quando você disser algo como *"não gostei dessa imagem do 
 
 Exemplo de como uma landing page fica registrada no Cérebro Compartilhado, na prática:
 ```
-landing_smarttap: {
+landing_produto: {
   hero_image: { url: "...", agent: "creative", version: 3 },
   hero_text: { content: "...", agent: "copy", version: 1 },
   pricing_text: { content: "...", agent: "copy", version: 2 },
@@ -180,7 +180,7 @@ Junta o que você já tem (Research Agent do Growth Agency + Market Intelligence
 - **Email Agent** — sequências de nutrição e campanhas (já estava no seu roadmap anterior)
 - **Naming/Virality Agent** (que você pediu) — gera nomes de produto, taglines, hooks virais
 
-**Integrações necessárias:** Google Ads API, Meta Marketing API, Resend (você já usa pro SmartTap, dá pra reaproveitar)
+**Integrações necessárias:** Google Ads API, Meta Marketing API, Resend (você já usa em outro produto, dá pra reaproveitar)
 
 **Prioridade:** P1.
 
@@ -218,11 +218,11 @@ Junta o que você já tem (Research Agent do Growth Agency + Market Intelligence
 ### 8.2 Customer Service Agent
 **O que faz:** responde dúvidas de clientes, resolve problemas simples, escala pra você quando não sabe resolver.
 
-**O que falta:** tudo — um agente conectado ao WhatsApp Business (você já tem isso configurado no SmartTap!) que responde automaticamente, e escala casos complexos.
+**O que falta:** tudo — um agente conectado ao WhatsApp Business (você já tem isso configurado em outro produto!) que responde automaticamente, e escala casos complexos.
 
-**Integrações necessárias:** WhatsApp Business API (já configurado no SmartTap), um sistema de helpdesk simples (pode ser até uma tabela no Supabase pra começar, sem precisar de ferramenta paga)
+**Integrações necessárias:** WhatsApp Business API (já configurada em outro produto), um sistema de helpdesk simples (pode ser até uma tabela no Supabase pra começar, sem precisar de ferramenta paga)
 
-**Prioridade:** P0 pro SmartTap especificamente, já que o WhatsApp bot já existe — só falta ligar ele numa lógica de "empresa" mais ampla.
+**Prioridade:** P0 pro produto que já tem WhatsApp bot, já que ele existe — só falta ligar ele numa lógica de "empresa" mais ampla.
 
 **Aprovação humana:** não pra dúvidas simples, sim pra qualquer coisa envolvendo reembolso, cancelamento ou reclamação séria.
 
@@ -261,7 +261,7 @@ Junta o que você já tem (Research Agent do Growth Agency + Market Intelligence
 
 **Integrações necessárias:** nenhuma API específica — é trabalho de geração de texto + pesquisa de regulamentação
 
-**Prioridade:** P1 — importante, mas os produtos atuais (SmartTap, TALOA) já estão rodando, então não é bloqueante imediato.
+**Prioridade:** P1 — importante, mas os produtos atuais (ex.: TALOA) já estão rodando, então não é bloqueante imediato.
 
 **Aprovação humana:** **SIM, SEMPRE, sem exceção.** O agente prepara o rascunho, mas um advogado real (ou você, com cuidado) precisa revisar antes de publicar qualquer termo legal. Isso protege você de verdade — termo de privacidade errado pode gerar multa de GDPR.
 
@@ -295,7 +295,7 @@ Todo agente, antes de começar a trabalhar, consulta essa tabela. Isso resolve o
 
 **Prioridade:** P0 — isso é a base que faz a empresa funcionar como empresa, e não como um monte de scripts soltos.
 
-**Implementado em 02/07/2026:** projeto Supabase dedicado criado separadamente de qualquer produto, especificamente para o Company Brain. URL: https://bybocxguyoejfdhlszpo.supabase.co. Tabelas `company_brain` e `brand_context` já criadas via SQL, com seed inicial do SmartTap. Credencial salva no n8n como 'Capivarex Brain Supabase'.
+**Implementado em 02/07/2026:** projeto Supabase dedicado criado separadamente de qualquer produto, especificamente para o Company Brain. URL: https://bybocxguyoejfdhlszpo.supabase.co. Tabelas `company_brain` e `brand_context` já criadas via SQL, com seed inicial do produto piloto. Credencial salva no n8n como 'Capivarex Brain Supabase'.
 
 ### 12.2 Orquestração (n8n)
 Já é a ferramenta certa — só precisa crescer de "4 workflows soltos" pra "1 workflow master + sub-workflows por departamento".
@@ -317,7 +317,7 @@ Já é a ferramenta certa — só precisa crescer de "4 workflows soltos" pra "1
 | GitHub | ✅ Conectado | Deploy, Dev Agent |
 | Perplexity / Brave Search | ✅ Conectado | Research Agent |
 | Stripe | ✅ Conectado (visto nas abas) | Financeiro (falta o agente) |
-| WhatsApp Business API | ✅ Conectado (SmartTap) | Customer Service (falta ligar ao resto) |
+| WhatsApp Business API | ✅ Conectado (produto piloto) | Customer Service (falta ligar ao resto) |
 | Higgsfield | ✅ Conectado (MCP) | Video Agent (falta construir) |
 | Canva | ✅ Conectado (MCP) | Brand Identity Agent (falta construir) |
 | Google Ads API | ❌ Falta | Marketing/Ads Agent |
@@ -384,7 +384,7 @@ Não é sobre ter 30 agentes por ter. É sobre:
 
 - Cada departamento realmente **entregar valor real**, testado, sem gambiarra
 - A empresa conseguir **rodar do início ao fim** (pesquisa → criação → lançamento → venda → suporte) com o mínimo de intervenção manual, mas com os portões de segurança certos nos lugares certos
-- Ser **reutilizável pra qualquer produto novo** (SmartTap, TALOA, ou um cliente white-label futuro) só trocando o Cérebro Compartilhado, sem reescrever os agentes
+- Ser **reutilizável pra qualquer produto novo** (TALOA, ou um cliente white-label futuro) só trocando o Cérebro Compartilhado, sem reescrever os agentes
 - Você conseguir **confiar** no sistema — saber o que ele fez, por quê, e poder reverter se precisar
 
 ---

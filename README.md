@@ -197,7 +197,7 @@ FOUNDER_PROFILE = {
         ]
     },
     "markets": ["Ireland", "Europe", "Brazil", "Portuguese-speaking markets"],
-    "active_projects": ["SmartTap", "TALOA", "InMyHouses"],
+    "active_projects": ["TALOA", "InMyHouses"],
     "budget_range": "bootstrap",
     "tools_available": [
         "Claude Code", "OpenAI", "Vercel", "Railway",
