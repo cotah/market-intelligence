@@ -24,6 +24,17 @@ _APIFY_MIN_ITEMS = 24
 # Quantos posts realmente usamos na pipeline (mesmo volume de antes).
 _MAX_RESULTS = 10
 
+# Etapa 2: comentarios de um post especifico (evidencia de dor espontanea).
+_COMMENTS_ACTOR = "apidojo~instagram-comments-scraper-api"
+_COMMENTS_RUN_URL = f"https://api.apify.com/v2/acts/{_COMMENTS_ACTOR}/run-sync-get-dataset-items"
+_MAX_COMMENTS = 20
+
+_MOCK_COMMENT_TEMPLATES: list[dict] = [
+    {"text": "omg this is literally my biggest struggle, nothing out there works", "likes": 57},
+    {"text": "I wish someone would finally fix this, I waste hours every week on it", "likes": 23},
+    {"text": "same here!! tried 3 different tools and gave up on all of them", "likes": 11},
+]
+
 _MOCK_TEMPLATES: list[dict] = [
     {
         "caption": "Finally tried a tool for #{hashtag} and honestly it changed how I run my business",
@@ -98,6 +109,84 @@ def _mock_results(hashtag: str) -> list[dict]:
     ]
     log.info("instagram.completed", hashtag=hashtag, results_count=len(results), mock=True)
     return results
+
+
+async def _get_comments_real(post_url: str) -> list[dict] | None:
+    """Busca comentarios reais de um post via Apify. Retorna None se a
+    chamada falhar (o chamador cai no mock nesse caso)."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            response = await client.post(
+                _COMMENTS_RUN_URL,
+                params={"token": settings.apify_api_token},
+                json={
+                    "startUrls": [post_url],
+                    "maxItems": _MAX_COMMENTS,
+                },
+            )
+            response.raise_for_status()
+            items = response.json()
+    except httpx.HTTPStatusError as e:
+        # Corpo da resposta no log: a Apify explica o motivo ali.
+        log.warning(
+            "instagram.comments_apify_failed",
+            error=str(e),
+            response_body=e.response.text[:500],
+        )
+        return None
+    except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
+        log.warning("instagram.comments_apify_failed", error=str(e))
+        return None
+
+    return [
+        {
+            "text": (item.get("text") or "")[:1000],
+            "likes": item.get("likeCount", 0),
+            "post_url": post_url,
+            "is_mock": False,
+        }
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
+def _mock_comments(post_url: str) -> list[dict]:
+    results = [
+        {
+            "text": tpl["text"],
+            "likes": tpl["likes"],
+            "post_url": post_url,
+            "is_mock": True,
+        }
+        for tpl in _MOCK_COMMENT_TEMPLATES
+    ]
+    log.info("instagram.comments_completed", post_url=post_url, results_count=len(results), mock=True)
+    return results
+
+
+async def get_comments(post_url: str) -> list[dict]:
+    """Retorna comentarios recentes de um post especifico do Instagram.
+
+    Etapa 2 do problem_hunter: comentario e onde a reacao espontanea
+    aparece (mais parecido com evidencia de dor do Reddit do que a
+    legenda do post). Mesmo padrao de graceful degradation do
+    search_hashtag: sem token, ou falha na chamada real -> mock.
+
+    Estrutura: [{"text", "likes", "post_url", "is_mock"}].
+    """
+    if settings.apify_api_token:
+        real_results = await _get_comments_real(post_url)
+        if real_results is not None:
+            log.info(
+                "instagram.comments_completed",
+                post_url=post_url,
+                results_count=len(real_results),
+                mock=False,
+            )
+            return real_results
+        log.warning("instagram.comments_falling_back_to_mock", post_url=post_url)
+
+    return _mock_comments(post_url)
 
 
 async def search_hashtag(hashtag: str) -> list[dict]:

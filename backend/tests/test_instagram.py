@@ -72,3 +72,55 @@ async def test_search_hashtag_falls_back_to_mock_when_apify_fails(monkeypatch, h
 
     assert len(results) > 0
     assert all(r["is_mock"] is True for r in results)
+
+
+# --- get_comments (Etapa 2: comentarios de um post especifico) ---
+
+_POST_URL = "https://www.instagram.com/p/ABC123/"
+
+
+async def test_get_comments_uses_mock_without_apify_token():
+    results = await instagram.get_comments(_POST_URL)
+
+    assert len(results) > 0
+    assert all(r["is_mock"] is True for r in results)
+    assert all(r["post_url"] == _POST_URL for r in results)
+
+
+async def test_get_comments_uses_real_data_when_apify_token_present(monkeypatch, httpx_mock):
+    monkeypatch.setattr(settings, "apify_api_token", "fake_token")
+
+    httpx_mock.add_response(
+        url=(
+            "https://api.apify.com/v2/acts/apidojo~instagram-comments-scraper-api"
+            "/run-sync-get-dataset-items?token=fake_token"
+        ),
+        method="POST",
+        # Fixa o payload: e isso que o ator espera (licao do bug do max_items).
+        match_json={"startUrls": [_POST_URL], "maxItems": 20},
+        json=[
+            {
+                "text": "omg this happens to me every single day, I lose so many clients",
+                "likeCount": 42,
+            }
+        ],
+    )
+
+    results = await instagram.get_comments(_POST_URL)
+
+    assert len(results) == 1
+    assert results[0]["is_mock"] is False
+    assert "lose so many clients" in results[0]["text"]
+    assert results[0]["likes"] == 42
+    assert results[0]["post_url"] == _POST_URL
+
+
+async def test_get_comments_falls_back_to_mock_when_apify_fails(monkeypatch, httpx_mock):
+    monkeypatch.setattr(settings, "apify_api_token", "fake_token")
+
+    httpx_mock.add_exception(httpx.ConnectTimeout("timed out"), method="POST")
+
+    results = await instagram.get_comments(_POST_URL)
+
+    assert len(results) > 0
+    assert all(r["is_mock"] is True for r in results)

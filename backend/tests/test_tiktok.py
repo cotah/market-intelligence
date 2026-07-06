@@ -70,3 +70,55 @@ async def test_search_hashtag_falls_back_to_mock_when_apify_fails(monkeypatch, h
 
     assert len(results) > 0
     assert all(r["is_mock"] is True for r in results)
+
+
+# --- get_comments (Etapa 2: comentarios de um video especifico) ---
+
+_POST_URL = "https://www.tiktok.com/@user/video/7300000000000000000"
+
+
+async def test_get_comments_uses_mock_without_apify_token():
+    results = await tiktok.get_comments(_POST_URL)
+
+    assert len(results) > 0
+    assert all(r["is_mock"] is True for r in results)
+    assert all(r["post_url"] == _POST_URL for r in results)
+
+
+async def test_get_comments_uses_real_data_when_apify_token_present(monkeypatch, httpx_mock):
+    monkeypatch.setattr(settings, "apify_api_token", "fake_token")
+
+    httpx_mock.add_response(
+        url=(
+            "https://api.apify.com/v2/acts/apidojo~tiktok-comments-scraper"
+            "/run-sync-get-dataset-items?token=fake_token"
+        ),
+        method="POST",
+        # Fixa o payload: e isso que o ator espera (licao do bug do max_items).
+        match_json={"postURLs": [_POST_URL], "includeReplies": False, "maxItems": 20},
+        json=[
+            {
+                "text": "bro I deal with this every day at my salon, it drives me crazy",
+                "diggCount": 310,
+            }
+        ],
+    )
+
+    results = await tiktok.get_comments(_POST_URL)
+
+    assert len(results) == 1
+    assert results[0]["is_mock"] is False
+    assert "drives me crazy" in results[0]["text"]
+    assert results[0]["likes"] == 310
+    assert results[0]["post_url"] == _POST_URL
+
+
+async def test_get_comments_falls_back_to_mock_when_apify_fails(monkeypatch, httpx_mock):
+    monkeypatch.setattr(settings, "apify_api_token", "fake_token")
+
+    httpx_mock.add_exception(httpx.ConnectTimeout("timed out"), method="POST")
+
+    results = await tiktok.get_comments(_POST_URL)
+
+    assert len(results) > 0
+    assert all(r["is_mock"] is True for r in results)
