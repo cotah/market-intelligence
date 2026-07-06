@@ -1,4 +1,8 @@
-// Cliente do backend. Todas as chamadas sao client-side (NEXT_PUBLIC_API_URL).
+// Cliente do backend.
+// - Leituras vao direto ao backend (NEXT_PUBLIC_API_URL).
+// - Acoes de CONTROLE (pipeline, perfil, gerar relatorio) passam pelo proxy
+//   server-side /api/control/*, que injeta a chave CONTROL_API_KEY —
+//   a chave nunca chega ao navegador.
 
 import type {
   DailyReport,
@@ -23,9 +27,11 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Caminho relativo (/api/control/...) = proxy no proprio Next.js.
+  const url = path.startsWith("/api/") ? path : `${BASE_URL}${path}`;
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
+    res = await fetch(url, {
       ...init,
       headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
       cache: "no-store",
@@ -48,6 +54,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Prefixo das acoes de controle: passam pelo proxy server-side.
+const CONTROL = "/api/control";
+
 export interface OpportunityFilters {
   scoreMin?: number;
   status?: OpportunityStatus;
@@ -69,16 +78,19 @@ export const api = {
   listDailyReports: () => request<DailyReport[]>("/reports/daily"),
   latestDailyReport: () => request<DailyReport>("/reports/daily/latest"),
   generateDailyReport: () =>
-    request<PipelineAction>("/reports/daily/generate", { method: "POST" }),
+    request<PipelineAction>(`${CONTROL}/reports/daily/generate`, { method: "POST" }),
 
   pipelineStatus: () => request<PipelineStatus>("/pipeline/status"),
-  startPipeline: () => request<PipelineAction>("/pipeline/start", { method: "POST" }),
-  stopPipeline: () => request<PipelineAction>("/pipeline/stop", { method: "POST" }),
-  runOnce: () => request<PipelineAction>("/pipeline/run-once", { method: "POST" }),
+  startPipeline: () =>
+    request<PipelineAction>(`${CONTROL}/pipeline/start`, { method: "POST" }),
+  stopPipeline: () =>
+    request<PipelineAction>(`${CONTROL}/pipeline/stop`, { method: "POST" }),
+  runOnce: () =>
+    request<PipelineAction>(`${CONTROL}/pipeline/run-once`, { method: "POST" }),
 
   getFounderProfile: () => request<FounderProfile>("/founder-profile"),
   saveFounderProfile: (profile: FounderProfile) =>
-    request<FounderProfile>("/founder-profile", {
+    request<FounderProfile>(`${CONTROL}/founder-profile`, {
       method: "PUT",
       body: JSON.stringify(profile),
     }),
