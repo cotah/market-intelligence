@@ -28,14 +28,17 @@ _MOCK_TEMPLATES: list[dict] = [
     {
         "caption": "Finally tried a tool for #{hashtag} and honestly it changed how I run my business",
         "likes": 892,
+        "post_url": "https://www.instagram.com/p/MOCK00001/",
     },
     {
         "caption": "Why is #{hashtag} still so hard in 2026? Spent the whole morning fighting with it",
         "likes": 431,
+        "post_url": "https://www.instagram.com/p/MOCK00002/",
     },
     {
         "caption": "Small biz owners: what are you using for #{hashtag}? Nothing I tried actually works",
         "likes": 267,
+        "post_url": "https://www.instagram.com/p/MOCK00003/",
     },
 ]
 
@@ -74,6 +77,7 @@ async def _search_real(hashtag: str) -> list[dict] | None:
             "caption": (item.get("caption") or "")[:1000],
             "likes": item.get("like_count", 0),
             "hashtag": hashtag,
+            "post_url": item.get("url", ""),
             "is_mock": False,
         }
         for item in items
@@ -87,6 +91,7 @@ def _mock_results(hashtag: str) -> list[dict]:
             "caption": tpl["caption"].format(hashtag=hashtag),
             "likes": tpl["likes"],
             "hashtag": hashtag,
+            "post_url": tpl["post_url"],
             "is_mock": True,
         }
         for tpl in _MOCK_TEMPLATES
@@ -102,7 +107,7 @@ async def search_hashtag(hashtag: str) -> list[dict]:
     modo simulado se o token faltar, ou se a chamada real falhar por
     qualquer motivo (graceful degradation).
 
-    Estrutura: [{"caption", "likes", "hashtag", "is_mock"}].
+    Estrutura: [{"caption", "likes", "hashtag", "post_url", "is_mock"}].
     """
     if settings.apify_api_token:
         real_results = await _search_real(hashtag)

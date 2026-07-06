@@ -28,6 +28,9 @@ async def test_search_hashtag_uses_mock_without_apify_token():
     assert len(results) > 0
     assert all(r["is_mock"] is True for r in results)
     assert all(r["hashtag"] == "aireceptionist" for r in results)
+    # Mock tambem carrega post_url (fake) pra pipeline sem token exercitar
+    # o fluxo de comentarios (Etapa 2) em modo mock.
+    assert all(r["post_url"].startswith("https://www.tiktok.com/") for r in results)
 
 
 async def test_search_hashtag_uses_real_data_when_apify_token_present(monkeypatch, httpx_mock):
@@ -43,6 +46,7 @@ async def test_search_hashtag_uses_real_data_when_apify_token_present(monkeypatc
             {
                 "text": "POV: your AI receptionist books clients while you sleep #aireceptionist",
                 "diggCount": 25400,
+                "url": "https://www.tiktok.com/@user/video/7300000000000000000",
             }
         ],
     )
@@ -54,6 +58,7 @@ async def test_search_hashtag_uses_real_data_when_apify_token_present(monkeypatc
     assert "AI receptionist" in results[0]["description"]
     assert results[0]["likes"] == 25400
     assert results[0]["hashtag"] == "aireceptionist"
+    assert results[0]["post_url"] == "https://www.tiktok.com/@user/video/7300000000000000000"
 
 
 async def test_search_hashtag_falls_back_to_mock_when_apify_fails(monkeypatch, httpx_mock):

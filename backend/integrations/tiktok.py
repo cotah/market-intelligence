@@ -24,14 +24,17 @@ _MOCK_TEMPLATES: list[dict] = [
     {
         "description": "POV: you finally found something that solves #{hashtag} and it feels illegal",
         "likes": 18200,
+        "post_url": "https://www.tiktok.com/@mockuser1/video/7300000000000000001",
     },
     {
         "description": "Nobody talks about how painful #{hashtag} is for small business owners",
         "likes": 7400,
+        "post_url": "https://www.tiktok.com/@mockuser2/video/7300000000000000002",
     },
     {
         "description": "Rating every tool I tried for #{hashtag} — most of them failed me",
         "likes": 3100,
+        "post_url": "https://www.tiktok.com/@mockuser3/video/7300000000000000003",
     },
 ]
 
@@ -60,6 +63,7 @@ async def _search_real(hashtag: str) -> list[dict] | None:
             "description": (item.get("text") or "")[:1000],
             "likes": item.get("diggCount", 0),
             "hashtag": hashtag,
+            "post_url": item.get("url", ""),
             "is_mock": False,
         }
         for item in items
@@ -73,6 +77,7 @@ def _mock_results(hashtag: str) -> list[dict]:
             "description": tpl["description"].format(hashtag=hashtag),
             "likes": tpl["likes"],
             "hashtag": hashtag,
+            "post_url": tpl["post_url"],
             "is_mock": True,
         }
         for tpl in _MOCK_TEMPLATES
@@ -88,7 +93,7 @@ async def search_hashtag(hashtag: str) -> list[dict]:
     modo simulado se o token faltar, ou se a chamada real falhar por
     qualquer motivo (graceful degradation).
 
-    Estrutura: [{"description", "likes", "hashtag", "is_mock"}].
+    Estrutura: [{"description", "likes", "hashtag", "post_url", "is_mock"}].
     """
     if settings.apify_api_token:
         real_results = await _search_real(hashtag)
