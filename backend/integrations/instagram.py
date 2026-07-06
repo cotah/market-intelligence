@@ -19,6 +19,10 @@ log = get_logger("integrations.instagram")
 _ACTOR = "breathtaking_anthem~instagram-hashtag-posts-scraper"
 _RUN_URL = f"https://api.apify.com/v2/acts/{_ACTOR}/run-sync-get-dataset-items"
 _TIMEOUT = 60.0
+# O ator valida max_items >= 24 (abaixo disso a Apify responde 400 sem criar run).
+_APIFY_MIN_ITEMS = 24
+# Quantos posts realmente usamos na pipeline (mesmo volume de antes).
+_MAX_RESULTS = 10
 
 _MOCK_TEMPLATES: list[dict] = [
     {
@@ -47,11 +51,20 @@ async def _search_real(hashtag: str) -> list[dict] | None:
                 json={
                     "hashtag": hashtag,
                     "scrape_type": "recent",
-                    "max_items": 10,
+                    "max_items": _APIFY_MIN_ITEMS,
                 },
             )
             response.raise_for_status()
             items = response.json()
+    except httpx.HTTPStatusError as e:
+        # Inclui o corpo da resposta no log — a Apify explica o motivo ali
+        # (ex.: invalid-input), e so o status "400" nao diz nada.
+        log.warning(
+            "instagram.apify_failed",
+            error=str(e),
+            response_body=e.response.text[:500],
+        )
+        return None
     except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
         log.warning("instagram.apify_failed", error=str(e))
         return None
@@ -59,13 +72,13 @@ async def _search_real(hashtag: str) -> list[dict] | None:
     return [
         {
             "caption": (item.get("caption") or "")[:1000],
-            "likes": item.get("likesCount", 0),
+            "likes": item.get("like_count", 0),
             "hashtag": hashtag,
             "is_mock": False,
         }
         for item in items
         if isinstance(item, dict)
-    ]
+    ][:_MAX_RESULTS]
 
 
 def _mock_results(hashtag: str) -> list[dict]:

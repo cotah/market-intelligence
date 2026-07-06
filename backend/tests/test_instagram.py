@@ -39,10 +39,12 @@ async def test_search_hashtag_uses_real_data_when_apify_token_present(monkeypatc
             "/run-sync-get-dataset-items?token=fake_token"
         ),
         method="POST",
+        # O ator exige max_items >= 24 — a Apify rejeita com 400 abaixo disso.
+        match_json={"hashtag": "aireceptionist", "scrape_type": "recent", "max_items": 24},
         json=[
             {
                 "caption": "Our AI receptionist answered 200 calls this week #aireceptionist",
-                "likesCount": 1543,
+                "like_count": 1543,
             }
         ],
     )
