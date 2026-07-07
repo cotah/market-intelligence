@@ -53,6 +53,15 @@ async def google_search(query: str, num_results: int = 10) -> list[dict]:
 
             log.info("serper.completed", results_count=len(results))
             return results
+    except httpx.HTTPStatusError as e:
+        # Corpo da resposta no log: "400" sozinho esconde o motivo real
+        # (ex.: "Not enough credits", visto em producao 2026-07-07).
+        log.error(
+            "serper.failed",
+            error=str(e),
+            response_body=e.response.text[:500],
+        )
+        return []
     except Exception as e:  # noqa: BLE001 - degradacao graciosa
-        log.error("serper.failed", error=str(e))
+        log.error("serper.failed", error=str(e), error_type=type(e).__name__)
         return []
