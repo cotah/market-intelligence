@@ -156,6 +156,23 @@ async def test_get_comments_falls_back_to_mock_when_apify_fails(monkeypatch, htt
     assert all(r["is_mock"] is True for r in results)
 
 
+async def test_get_comments_logs_exception_type_when_message_is_empty(monkeypatch, httpx_mock):
+    """Excecao com str() vazia gera log inutil (error="" visto em producao
+    2026-07-07) — o log precisa do tipo da excecao pra ser debugavel."""
+    import structlog.testing
+
+    monkeypatch.setattr(settings, "apify_api_token", "fake_token")
+
+    httpx_mock.add_exception(httpx.ConnectError(""), method="POST")
+
+    with structlog.testing.capture_logs() as logs:
+        await instagram.get_comments(_POST_URL)
+
+    failures = [entry for entry in logs if entry["event"] == "instagram.comments_apify_failed"]
+    assert failures
+    assert failures[0]["error_type"] == "ConnectError"
+
+
 async def test_get_comments_does_not_leak_token_in_logs(monkeypatch, httpx_mock):
     """HTTPStatusError inclui a URL com ?token=... — o log nao pode vazar
     o token (visto nos logs do Railway em 2026-07-06)."""

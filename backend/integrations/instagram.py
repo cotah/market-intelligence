@@ -81,7 +81,13 @@ async def _search_real(hashtag: str) -> list[dict] | None:
         )
         return None
     except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
-        log.warning("instagram.apify_failed", error=redact_token(str(e)))
+        # error_type: str(e) pode ser vazia (visto em producao) e ai so o
+        # tipo da excecao torna o log debugavel.
+        log.warning(
+            "instagram.apify_failed",
+            error=redact_token(str(e)),
+            error_type=type(e).__name__,
+        )
         return None
 
     return [
@@ -138,7 +144,13 @@ async def _get_comments_real(post_url: str) -> list[dict] | None:
         )
         return None
     except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
-        log.warning("instagram.comments_apify_failed", error=redact_token(str(e)))
+        # error_type: str(e) pode ser vazia (visto em producao) e ai so o
+        # tipo da excecao torna o log debugavel.
+        log.warning(
+            "instagram.comments_apify_failed",
+            error=redact_token(str(e)),
+            error_type=type(e).__name__,
+        )
         return None
 
     return [

@@ -67,7 +67,13 @@ async def _search_real(hashtag: str) -> list[dict] | None:
             response.raise_for_status()
             items = response.json()
     except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
-        log.warning("tiktok.apify_failed", error=redact_token(str(e)))
+        # error_type: str(e) pode ser vazia (visto em producao) e ai so o
+        # tipo da excecao torna o log debugavel.
+        log.warning(
+            "tiktok.apify_failed",
+            error=redact_token(str(e)),
+            error_type=type(e).__name__,
+        )
         return None
 
     return [
@@ -129,7 +135,13 @@ async def _get_comments_real(post_url: str) -> list[dict] | None:
         )
         return None
     except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
-        log.warning("tiktok.comments_apify_failed", error=redact_token(str(e)))
+        # error_type: str(e) pode ser vazia (visto em producao) e ai so o
+        # tipo da excecao torna o log debugavel.
+        log.warning(
+            "tiktok.comments_apify_failed",
+            error=redact_token(str(e)),
+            error_type=type(e).__name__,
+        )
         return None
 
     return [
