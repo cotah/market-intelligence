@@ -143,8 +143,10 @@ async def _get_comments_real(post_url: str) -> list[dict] | None:
 
     return [
         {
-            "text": (item.get("text") or "")[:1000],
-            "likes": item.get("likeCount", 0),
+            # Dataset do apidojo traz o texto em "message"; "text" fica como
+            # fallback defensivo caso o ator mude o schema.
+            "text": (item.get("message") or item.get("text") or "")[:1000],
+            "likes": item.get("likeCount") or 0,
             "post_url": post_url,
             "is_mock": False,
         }

@@ -127,7 +127,10 @@ async def test_get_comments_uses_real_data_when_apify_token_present(monkeypatch,
         match_json={"startUrls": [_POST_URL], "maxItems": 20},
         json=[
             {
-                "text": "omg this happens to me every single day, I lose so many clients",
+                # Dataset real do apidojo~instagram-comments-scraper-api traz o
+                # texto do comentario em "message" (nao "text") — visto em
+                # teste real na Apify em 2026-07-07.
+                "message": "omg this happens to me every single day, I lose so many clients",
                 "likeCount": 42,
             }
         ],
