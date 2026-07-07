@@ -94,6 +94,10 @@ async def _search_real(hashtag: str) -> list[dict] | None:
         {
             "caption": (item.get("caption") or "")[:1000],
             "likes": item.get("like_count", 0),
+            # comments orienta a Etapa 2: buscar comentarios so faz sentido
+            # nos posts que TEM comentarios (em producao, os posts com mais
+            # likes tinham 0 comentarios).
+            "comments": item.get("comment_count", 0),
             "hashtag": hashtag,
             "post_url": item.get("url", ""),
             "is_mock": False,

@@ -27,7 +27,7 @@ log = get_logger("agents.problem_hunter")
 _MIN_PAIN_EVIDENCES = 3
 
 # Etapa 2: de quantos posts (por fonte) buscamos comentarios. Cada busca e um
-# run do Apify (custo!), entao limitamos aos posts com mais likes.
+# run do Apify (custo!), entao limitamos aos posts com mais comentarios.
 _COMMENTS_POSTS_PER_SOURCE = 2
 
 _SYSTEM = (
@@ -67,7 +67,7 @@ class ProblemHunterAgent(BaseAgent):
         tiktok_posts = self._or_default(raw[3], [], "tiktok")
         app_name, reviews = self._or_default(raw[4], ("", []), "app_reviews")
 
-        # 1b. Etapa 2: comentarios dos top posts (por likes) de IG e TikTok.
+        # 1b. Etapa 2: comentarios dos top posts (por comentarios) de IG e TikTok.
         # Comentario e onde a dor espontanea aparece — mais proximo do Reddit
         # do que a legenda do post. Tambem em paralelo e com degradacao
         # individual (um post que falhar vira lista vazia).
@@ -182,9 +182,17 @@ Only include pain_phrases that are backed by the discussions above."""
 
     @staticmethod
     def _top_post_urls(posts: list[dict], limit: int = _COMMENTS_POSTS_PER_SOURCE) -> list[str]:
-        """URLs dos `limit` posts com mais likes (ignora posts sem post_url)."""
+        """URLs dos `limit` posts com mais comentarios (likes como desempate).
+
+        Comentarios primeiro: buscar comentarios em post sem comentarios
+        desperdica um run do Apify (visto em producao 2026-07-07). Fontes
+        que nao expoem "comments" (TikTok) caem no desempate por likes.
+        """
         with_url = [p for p in posts if p.get("post_url")]
-        with_url.sort(key=lambda p: p.get("likes", 0), reverse=True)
+        with_url.sort(
+            key=lambda p: (p.get("comments", 0), p.get("likes", 0)),
+            reverse=True,
+        )
         return [p["post_url"] for p in with_url[:limit]]
 
     @staticmethod

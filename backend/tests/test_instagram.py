@@ -48,6 +48,7 @@ async def test_search_hashtag_uses_real_data_when_apify_token_present(monkeypatc
             {
                 "caption": "Our AI receptionist answered 200 calls this week #aireceptionist",
                 "like_count": 1543,
+                "comment_count": 37,
                 "url": "https://www.instagram.com/p/ABC123/",
             }
         ],
@@ -59,6 +60,9 @@ async def test_search_hashtag_uses_real_data_when_apify_token_present(monkeypatc
     assert results[0]["is_mock"] is False
     assert "AI receptionist" in results[0]["caption"]
     assert results[0]["likes"] == 1543
+    # comments alimenta a escolha dos posts pra Etapa 2 (comentarios): em
+    # producao (2026-07-07) os posts com mais likes tinham 0 comentarios.
+    assert results[0]["comments"] == 37
     assert results[0]["hashtag"] == "aireceptionist"
     assert results[0]["post_url"] == "https://www.instagram.com/p/ABC123/"
 

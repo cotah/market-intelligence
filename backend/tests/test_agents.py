@@ -72,6 +72,35 @@ def patch_problem_sources(monkeypatch):
     return calls
 
 
+def test_top_post_urls_prefers_posts_with_comments():
+    """Etapa 2: a busca de comentarios deve ir nos posts COM comentarios.
+    Em producao (2026-07-07) o sort por likes escolhia posts com 0
+    comentarios enquanto os comentados (com 0 likes) ficavam de fora."""
+    posts = [
+        {"post_url": "https://ig/p/likes-sem-comments/", "likes": 300, "comments": 0},
+        {"post_url": "https://ig/p/comentado-a/", "likes": 0, "comments": 2},
+        {"post_url": "https://ig/p/comentado-b/", "likes": 1, "comments": 1},
+        {"post_url": "https://ig/p/nada/", "likes": 0, "comments": 0},
+    ]
+
+    urls = ProblemHunterAgent._top_post_urls(posts)
+
+    assert urls == ["https://ig/p/comentado-a/", "https://ig/p/comentado-b/"]
+
+
+def test_top_post_urls_falls_back_to_likes_without_comments_field():
+    """TikTok nao expoe comments — o sort continua por likes."""
+    posts = [
+        {"post_url": "https://tt/v/1", "likes": 10},
+        {"post_url": "https://tt/v/2", "likes": 900},
+        {"post_url": "https://tt/v/3", "likes": 50},
+    ]
+
+    urls = ProblemHunterAgent._top_post_urls(posts)
+
+    assert urls == ["https://tt/v/2", "https://tt/v/3"]
+
+
 async def test_problem_hunter_discards_with_few_evidences(monkeypatch, patch_problem_sources):
     import agents.problem_hunter as ph
 
