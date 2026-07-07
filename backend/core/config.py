@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     risk_flag_min_fatal_flaws: int = 2
     risk_flag_min_high_risks: int = 3
 
+    # --- Cache de APIs pagas (core/api_cache.py) ---
+    # Mesma query Serper/Apify repetida dentro do TTL nao paga credito 2x.
+    api_cache_ttl_seconds: int = 86400  # 24h
+
     # --- App ---
     environment: str = "development"
     log_level: str = "INFO"

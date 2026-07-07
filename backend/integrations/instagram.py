@@ -11,6 +11,7 @@ degradation). Cada resultado tem "is_mock" para deixar isso rastreavel.
 
 import httpx
 
+from core import api_cache
 from core.config import settings
 from core.logging_config import get_logger
 from core.text import redact_token
@@ -196,7 +197,12 @@ async def get_comments(post_url: str) -> list[dict]:
     Estrutura: [{"text", "likes", "post_url", "is_mock"}].
     """
     if settings.apify_api_token:
-        real_results = await _get_comments_real(post_url)
+        # Cache Redis: o mesmo post dentro do TTL nao paga o run da Apify 2x.
+        real_results = await api_cache.cached(
+            "instagram.comments",
+            {"post_url": post_url},
+            lambda: _get_comments_real(post_url),
+        )
         if real_results is not None:
             log.info(
                 "instagram.comments_completed",
@@ -220,7 +226,12 @@ async def search_hashtag(hashtag: str) -> list[dict]:
     Estrutura: [{"caption", "likes", "hashtag", "post_url", "is_mock"}].
     """
     if settings.apify_api_token:
-        real_results = await _search_real(hashtag)
+        # Cache Redis: a mesma hashtag dentro do TTL nao paga o run da Apify 2x.
+        real_results = await api_cache.cached(
+            "instagram.hashtag",
+            {"hashtag": hashtag},
+            lambda: _search_real(hashtag),
+        )
         if real_results is not None:
             log.info(
                 "instagram.completed",

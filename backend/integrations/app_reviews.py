@@ -15,6 +15,7 @@ nos concorrentes existentes.
 
 import httpx
 
+from core import api_cache
 from core.config import settings
 from core.logging_config import get_logger
 from core.text import redact_token
@@ -120,7 +121,12 @@ async def get_reviews(app_id: str) -> list[dict]:
     Estrutura: [{"title", "body", "rating", "is_mock"}].
     """
     if settings.apify_api_token:
-        real_results = await _get_reviews_real(app_id)
+        # Cache Redis: o mesmo app dentro do TTL nao paga o run da Apify 2x.
+        real_results = await api_cache.cached(
+            "app_reviews",
+            {"app_id": app_id},
+            lambda: _get_reviews_real(app_id),
+        )
         if real_results is not None:
             log.info(
                 "app_reviews.completed",

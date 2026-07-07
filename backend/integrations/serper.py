@@ -5,7 +5,7 @@ Graceful degradation: sem chave ou em caso de erro, retorna lista vazia.
 
 import httpx
 
-from core import summarize
+from core import api_cache, summarize
 from core.config import settings
 from core.logging_config import get_logger
 
@@ -19,11 +19,26 @@ _TIMEOUT = 30.0
 
 
 async def google_search(query: str, num_results: int = 10) -> list[dict]:
-    """Busca no Google via Serper. Retorna [{title, link, snippet}, ...]."""
+    """Busca no Google via Serper. Retorna [{title, link, snippet}, ...].
+
+    Com cache Redis: a mesma query dentro do TTL nao gasta credito de novo.
+    Cacheamos o resultado JA condensado (economiza tambem o LLM do resumo).
+    """
     if not settings.serper_api_key:
         log.warning("serper.skipped", reason="no_api_key")
         return []
 
+    results = await api_cache.cached(
+        "serper",
+        {"query": query, "num": num_results},
+        lambda: _search_real(query, num_results),
+    )
+    return results or []
+
+
+async def _search_real(query: str, num_results: int) -> list[dict]:
+    """Chamada real ao Serper. Retorna [] em caso de erro (graceful
+    degradation) — e lista vazia nunca entra no cache."""
     headers = {
         "X-API-KEY": settings.serper_api_key,
         "Content-Type": "application/json",

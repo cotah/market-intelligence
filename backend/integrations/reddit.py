@@ -16,6 +16,7 @@ resultado tem "is_mock" para deixar isso rastreavel no dado que chega no LLM.
 
 import httpx
 
+from core import api_cache
 from core.config import settings
 from core.logging_config import get_logger
 
@@ -110,7 +111,12 @@ async def search_reddit(subreddit: str, query: str) -> list[dict]:
     Estrutura: [{"title", "body", "upvotes", "subreddit", "is_mock"}].
     """
     if settings.apify_api_token:
-        real_results = await _search_real(subreddit, query)
+        # Cache Redis: a mesma busca dentro do TTL nao paga o run da Apify 2x.
+        real_results = await api_cache.cached(
+            "reddit",
+            {"subreddit": subreddit, "query": query},
+            lambda: _search_real(subreddit, query),
+        )
         if real_results is not None:
             log.info(
                 "reddit.completed",
