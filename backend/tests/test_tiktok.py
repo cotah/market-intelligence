@@ -127,6 +127,21 @@ async def test_search_hashtag_falls_back_to_mock_when_apify_fails(monkeypatch, h
     assert all(r["is_mock"] is True for r in results)
 
 
+async def test_search_hashtag_does_not_leak_token_in_logs(monkeypatch, httpx_mock):
+    """HTTPStatusError inclui a URL com ?token=... — o log nao pode vazar
+    o token (visto nos logs do Railway em 2026-07-06)."""
+    import structlog.testing
+
+    monkeypatch.setattr(settings, "apify_api_token", "super_secret_token")
+
+    httpx_mock.add_response(method="POST", status_code=400, text="bad input")
+
+    with structlog.testing.capture_logs() as logs:
+        await tiktok.search_hashtag("aireceptionist")
+
+    assert "super_secret_token" not in str(logs)
+
+
 # --- get_comments (Etapa 2: comentarios de um video especifico) ---
 
 _POST_URL = "https://www.tiktok.com/@user/video/7300000000000000000"

@@ -151,3 +151,18 @@ async def test_get_comments_falls_back_to_mock_when_apify_fails(monkeypatch, htt
 
     assert len(results) > 0
     assert all(r["is_mock"] is True for r in results)
+
+
+async def test_get_comments_does_not_leak_token_in_logs(monkeypatch, httpx_mock):
+    """HTTPStatusError inclui a URL com ?token=... — o log nao pode vazar
+    o token (visto nos logs do Railway em 2026-07-06)."""
+    import structlog.testing
+
+    monkeypatch.setattr(settings, "apify_api_token", "super_secret_token")
+
+    httpx_mock.add_response(method="POST", status_code=400, text="bad input")
+
+    with structlog.testing.capture_logs() as logs:
+        await instagram.get_comments(_POST_URL)
+
+    assert "super_secret_token" not in str(logs)

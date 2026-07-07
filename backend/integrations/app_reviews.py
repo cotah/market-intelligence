@@ -17,6 +17,7 @@ import httpx
 
 from core.config import settings
 from core.logging_config import get_logger
+from core.text import redact_token
 
 log = get_logger("integrations.app_reviews")
 
@@ -88,7 +89,7 @@ async def _get_reviews_real(app_id: str) -> list[dict] | None:
             response.raise_for_status()
             items = response.json()
     except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
-        log.warning("app_reviews.apify_failed", error=str(e))
+        log.warning("app_reviews.apify_failed", error=redact_token(str(e)))
         return None
 
     return [

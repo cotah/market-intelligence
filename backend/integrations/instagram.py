@@ -13,6 +13,7 @@ import httpx
 
 from core.config import settings
 from core.logging_config import get_logger
+from core.text import redact_token
 
 log = get_logger("integrations.instagram")
 
@@ -75,12 +76,12 @@ async def _search_real(hashtag: str) -> list[dict] | None:
         # (ex.: invalid-input), e so o status "400" nao diz nada.
         log.warning(
             "instagram.apify_failed",
-            error=str(e),
-            response_body=e.response.text[:500],
+            error=redact_token(str(e)),
+            response_body=redact_token(e.response.text[:500]),
         )
         return None
     except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
-        log.warning("instagram.apify_failed", error=str(e))
+        log.warning("instagram.apify_failed", error=redact_token(str(e)))
         return None
 
     return [
@@ -132,12 +133,12 @@ async def _get_comments_real(post_url: str) -> list[dict] | None:
         # Corpo da resposta no log: a Apify explica o motivo ali.
         log.warning(
             "instagram.comments_apify_failed",
-            error=str(e),
-            response_body=e.response.text[:500],
+            error=redact_token(str(e)),
+            response_body=redact_token(e.response.text[:500]),
         )
         return None
     except Exception as e:  # noqa: BLE001 - qualquer falha aqui vira fallback
-        log.warning("instagram.comments_apify_failed", error=str(e))
+        log.warning("instagram.comments_apify_failed", error=redact_token(str(e)))
         return None
 
     return [
