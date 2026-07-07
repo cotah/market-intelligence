@@ -164,12 +164,15 @@ async def test_get_comments_uses_real_data_when_apify_token_present(monkeypatch,
             "/run-sync-get-dataset-items?token=fake_token"
         ),
         method="POST",
-        # Fixa o payload: e isso que o ator espera (licao do bug do max_items).
-        match_json={"postURLs": [_POST_URL], "includeReplies": False, "maxItems": 20},
+        # Fixa o payload: o ator espera startUrls (run FAILED em producao
+        # 2026-07-07 com "Start URLs must be provided" ao mandar postURLs).
+        match_json={"startUrls": [_POST_URL], "includeReplies": False, "maxItems": 20},
         json=[
             {
+                # Dataset real do apidojo~tiktok-comments-scraper usa likeCount
+                # (nao diggCount) — visto em teste real na Apify em 2026-07-07.
                 "text": "bro I deal with this every day at my salon, it drives me crazy",
-                "diggCount": 310,
+                "likeCount": 310,
             }
         ],
     )

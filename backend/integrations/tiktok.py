@@ -111,7 +111,9 @@ async def _get_comments_real(post_url: str) -> list[dict] | None:
                 _COMMENTS_RUN_URL,
                 params={"token": settings.apify_api_token},
                 json={
-                    "postURLs": [post_url],
+                    # O ator exige "startUrls" — com "postURLs" o run falha
+                    # ("Start URLs must be provided", visto em producao 2026-07-07).
+                    "startUrls": [post_url],
                     "includeReplies": False,
                     "maxItems": _MAX_COMMENTS,
                 },
@@ -133,7 +135,8 @@ async def _get_comments_real(post_url: str) -> list[dict] | None:
     return [
         {
             "text": (item.get("text") or "")[:1000],
-            "likes": item.get("diggCount", 0),
+            # Dataset do apidojo usa likeCount (diggCount nao existe ali).
+            "likes": item.get("likeCount") or 0,
             "post_url": post_url,
             "is_mock": False,
         }
