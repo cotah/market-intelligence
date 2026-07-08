@@ -69,6 +69,37 @@ def run_pipeline_once_task(self) -> dict:
         raise
 
 
+@celery.task(name="workers.pipeline_worker.run_for_idea_task", bind=True)
+def run_for_idea_task(self, idea: dict) -> dict:
+    """Modo Ideia: analisa um produto/ideia trazido pelo fundador.
+
+    Roda a mesma cadeia de agentes, mas semeada com a ideia (sem Trend Hunter).
+    """
+    log.info("worker.run_for_idea.received", task_id=self.request.id)
+    try:
+        async def _run(session):
+            opp = await pipeline.run_for_idea(session, idea)
+            return {
+                "opportunity_id": str(opp.id),
+                "title": opp.title,
+                "status": opp.status.value,
+                "score_total": opp.score_total,
+            }
+
+        summary = asyncio.run(_with_session(_run))
+        pipeline_control.set_status({"trigger": "idea", "task_id": self.request.id, **summary})
+        log.info("worker.run_for_idea.completed", **summary)
+        return summary
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "worker.run_for_idea.failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            traceback=traceback.format_exc(),
+        )
+        raise
+
+
 @celery.task(name="workers.pipeline_worker.scheduled_run", bind=True)
 def scheduled_run(self) -> dict | None:
     """Rodada do modo continuo.

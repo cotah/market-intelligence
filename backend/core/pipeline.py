@@ -148,14 +148,20 @@ class Pipeline:
         return summary
 
     async def _process_topic(
-        self, session: AsyncSession, topic_data: dict, profile: dict | None = None
+        self,
+        session: AsyncSession,
+        topic_data: dict,
+        profile: dict | None = None,
+        *,
+        source: str = "trend_hunter",
+        ignore_discard_from: set[str] | None = None,
     ) -> Opportunity:
         topic_name = topic_data.get("name", "Unknown topic")
 
         opp = Opportunity(
             title=topic_name,
             topic_origin=topic_name,
-            source="trend_hunter",
+            source=source,
             status=OpportunityStatus.IN_PROGRESS,
             trend_data=topic_data,
         )
@@ -228,20 +234,30 @@ class Pipeline:
                 )
 
             if result.should_discard:
-                opp.status = OpportunityStatus.DISCARDED
-                opp.discard_reason = result.discard_reason
-                opp.discarded_by = agent.name
-                # Falhas anteriores ficam registradas mesmo no descarte.
-                if failed_agents:
-                    opp.failed_agents = failed_agents
-                log.info(
-                    "pipeline.topic.discarded",
-                    topic=topic_name,
-                    by=agent.name,
-                    reason=result.discard_reason,
-                )
-                await session.flush()
-                return opp
+                if ignore_discard_from and agent.name in ignore_discard_from:
+                    # Modo Ideia: este agente e informativo — registra o dado e
+                    # loga, mas NAO descarta (a cadeia continua).
+                    log.info(
+                        "pipeline.discard_ignored",
+                        topic=topic_name,
+                        agent=agent.name,
+                        reason=result.discard_reason,
+                    )
+                else:
+                    opp.status = OpportunityStatus.DISCARDED
+                    opp.discard_reason = result.discard_reason
+                    opp.discarded_by = agent.name
+                    # Falhas anteriores ficam registradas mesmo no descarte.
+                    if failed_agents:
+                        opp.failed_agents = failed_agents
+                    log.info(
+                        "pipeline.topic.discarded",
+                        topic=topic_name,
+                        by=agent.name,
+                        reason=result.discard_reason,
+                    )
+                    await session.flush()
+                    return opp
 
             # Rastreia cada agente que o topico passou, para saber exatamente
             # ate onde ele chegou antes de (eventualmente) ser descartado.
@@ -260,6 +276,40 @@ class Pipeline:
             score_total=opp.score_total,
             status=opp.status.value,
             failed_agents=[f["agent"] for f in failed_agents] or None,
+        )
+        return opp
+
+    async def run_for_idea(
+        self, session: AsyncSession, idea: dict, profile: dict | None = None
+    ) -> Opportunity:
+        """Modo Ideia: analisa um produto/ideia trazido pelo fundador em vez de
+        descobrir topicos (pula o Trend Hunter). Roda os mesmos agentes de
+        analise; a compatibilidade com o fundador vira INFORMATIVA — nao
+        descarta, porque o fundador ja escolheu seguir com a ideia."""
+        name = (str(idea.get("name") or "").strip()[:200]) or "Ideia sem nome"
+        description = str(idea.get("description") or "").strip()[:2000]
+        if profile is None:
+            profile = profile_to_dict(await get_profile(session))
+        topic_data = {
+            "name": name,
+            "description": description,
+            "source": "founder_idea",
+            "growth_signal": "n/a",
+        }
+        log.info("pipeline.run_for_idea.started", idea=name)
+        opp = await self._process_topic(
+            session,
+            topic_data,
+            profile,
+            source="founder_idea",
+            ignore_discard_from={"founder_compatibility"},
+        )
+        log.info(
+            "pipeline.run_for_idea.completed",
+            idea=name,
+            opportunity_id=str(opp.id),
+            status=opp.status.value,
+            score_total=opp.score_total,
         )
         return opp
 

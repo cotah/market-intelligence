@@ -309,3 +309,55 @@ async def test_run_once_counts_partial_separately(monkeypatch):
     assert summary["partial"] == 1
     assert summary["completed"] == 0
     assert summary["discarded"] == 0
+
+
+# --------------------------- Modo Ideia (run_for_idea) ---------------------------
+async def test_run_for_idea_sets_source_and_runs_agents():
+    problem = FakeAgent("problem_hunter", _ok({"pain_phrases": ["x"]}))
+    p = _pipeline_with([problem])
+
+    opp = await p.run_for_idea(
+        FakeSession(), {"name": "Coleira GPS", "description": "rastreador pet"}, profile={}
+    )
+
+    assert opp.source == "founder_idea"
+    assert opp.title == "Coleira GPS"
+    assert opp.trend_data["source"] == "founder_idea"
+    assert opp.problem_data == {"pain_phrases": ["x"]}
+    assert opp.status == OpportunityStatus.COMPLETED
+    assert problem.ran is True
+
+
+async def test_run_for_idea_ignores_founder_compatibility_discard():
+    problem = FakeAgent("problem_hunter", _ok({"pain_phrases": ["x"]}))
+    compat = FakeAgent(
+        "founder_compatibility",
+        AgentResult(success=True, data={"score": 20}, should_discard=True,
+                    discard_reason="compatibilidade baixa"),
+    )
+    after = FakeAgent("monetization", _ok({"models": ["saas"]}))
+    p = _pipeline_with([problem, compat, after])
+
+    opp = await p.run_for_idea(FakeSession(), {"name": "X", "description": "y"}, profile={})
+
+    # NAO descarta por compatibilidade; a cadeia continua ate o fim.
+    assert opp.status != OpportunityStatus.DISCARDED
+    assert opp.compatibility_data == {"score": 20}   # dado persistido (informativo)
+    assert after.ran is True
+    assert opp.monetization_data == {"models": ["saas"]}
+
+
+async def test_run_for_idea_still_discards_on_other_agents():
+    # Outros descartes (ex: problem_hunter sem dor real) AINDA valem no modo ideia.
+    problem = FakeAgent(
+        "problem_hunter",
+        AgentResult(success=True, data={}, should_discard=True, discard_reason="sem dor real"),
+    )
+    after = FakeAgent("monetization", _ok())
+    p = _pipeline_with([problem, after])
+
+    opp = await p.run_for_idea(FakeSession(), {"name": "X", "description": "y"}, profile={})
+
+    assert opp.status == OpportunityStatus.DISCARDED
+    assert opp.discarded_by == "problem_hunter"
+    assert after.ran is False

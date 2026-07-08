@@ -7,6 +7,7 @@ acesso ao banco e disparo de tarefas.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +68,35 @@ async def get_opportunity(
     if opp is None:
         raise HTTPException(status_code=404, detail="Opportunity not found")
     return opp
+
+
+class IdeaIn(BaseModel):
+    """Ideia/produto trazido pelo fundador (modo Ideia)."""
+
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=2000)
+
+
+@router.post(
+    "/opportunities/from-idea",
+    response_model=PipelineActionOut,
+    dependencies=[Depends(require_control_key)],
+)
+async def create_opportunity_from_idea(payload: IdeaIn) -> PipelineActionOut:
+    """Modo Ideia: o fundador traz um produto/ideia e a pipeline analisa em cima
+    dela (dor, concorrencia, mercado, IA, monetizacao, score, plano), SEM
+    descobrir topicos. A compatibilidade com o fundador vira informativa (nao
+    descarta). Enfileira no Celery e retorna o task_id."""
+    try:
+        from workers.pipeline_worker import run_for_idea_task
+
+        task = run_for_idea_task.delay(payload.model_dump())
+        return PipelineActionOut(
+            ok=True, message="Ideia enfileirada para analise.", task_id=str(task.id)
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("api.from_idea_failed", error=str(e))
+        return PipelineActionOut(ok=False, message=f"Falha ao enfileirar: {e}")
 
 
 # --------------------------- Founder Profile ----------------------------
