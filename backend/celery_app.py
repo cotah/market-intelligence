@@ -11,6 +11,9 @@ from celery.signals import setup_logging
 
 from core.config import settings
 from core.logging_config import configure_logging
+from core.observability import init_sentry
+
+init_sentry()
 
 celery = Celery(
     "market_intelligence",

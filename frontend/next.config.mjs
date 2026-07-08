@@ -1,5 +1,6 @@
 import path from "path";
 import { fileURLToPath } from "url";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -9,4 +10,10 @@ const nextConfig = {
   outputFileTracingRoot: __dirname,
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: "capivarex-real",
+  project: "market-intelligence-frontend",
+  // Sem SENTRY_AUTH_TOKEN o upload de sourcemap e pulado (build nao quebra).
+  silent: !process.env.CI,
+  disableLogger: true,
+});

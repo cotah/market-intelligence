@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
 
+    # --- Observabilidade (Sentry) ---
+    # Vazio = Sentry desligado (no-op). Setar o DSN do projeto no Railway.
+    # traces_sample_rate: 0.0 = so erros (sem performance/tracing).
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.0
+
     # CORS: dominios permitidos em producao, separados por virgula.
     # Vazio = libera tudo (modo dev). Em producao, setar para a URL da Vercel.
     allowed_origins: str = ""

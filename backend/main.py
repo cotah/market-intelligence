@@ -9,8 +9,10 @@ from api.research import router as research_router
 from api.routes import router
 from core.config import settings
 from core.logging_config import configure_logging, get_logger
+from core.observability import init_sentry
 
 configure_logging()
+init_sentry()
 log = get_logger("main")
 
 
