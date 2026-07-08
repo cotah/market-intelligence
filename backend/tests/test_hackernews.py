@@ -12,7 +12,6 @@ Cobre:
 """
 
 import httpx
-import pytest
 
 from integrations import hackernews
 

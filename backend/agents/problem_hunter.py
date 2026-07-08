@@ -17,7 +17,6 @@ import traceback
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core import llm
-from core.config import settings
 from core.logging_config import get_logger
 from core.text import to_hashtag
 from integrations import app_reviews, instagram, perplexity, reddit, tiktok

@@ -79,7 +79,7 @@ def set_status(data: dict) -> None:
 def get_status() -> dict:
     try:
         raw = _client().get(_KEY_STATUS)
-        return json.loads(raw) if raw else {}
+        return json.loads(raw) if raw else {}  # type: ignore[arg-type]
     except Exception as e:  # noqa: BLE001
         log.warning("pipeline_control.get_status_failed", error=str(e))
         return {}

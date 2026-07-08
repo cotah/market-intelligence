@@ -8,6 +8,8 @@ Os agentes 3-11 serao adicionados a `self.agents` na Fase 2, sem mudar
 a estrutura de orquestracao.
 """
 
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.ai_opportunity import AIOpportunityAgent
@@ -105,7 +107,7 @@ class Pipeline:
 
         # `discards` guarda o motivo de cada descarte (topico + agente + razao),
         # tanto para os logs quanto para aparecer no status/dashboard.
-        summary = {
+        summary: dict[str, Any] = {
             "topics": len(topics),
             "completed": 0,
             "partial": 0,

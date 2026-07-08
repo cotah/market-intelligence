@@ -29,6 +29,8 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "pytest-httpx>=0.30.0",
     "httpx>=0.27.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
 ]
 
 [tool.pytest.ini_options]
@@ -41,3 +43,23 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["core", "agents", "integrations", "models", "api", "workers"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Conservador de proposito: pega bugs reais (imports/nomes) e bugbear,
+# sem reordenar imports nem reformatar o repo. Da pra ligar "I"/"UP" depois.
+select = ["E4", "E7", "E9", "F", "B"]
+# B008: no FastAPI, Depends()/Query()/Header() como default de argumento e
+# idiomatico (nao e bug). Ignorado globalmente.
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+# Baseline gradual: config valida e pronta pra apertar com o tempo.
+warn_unused_ignores = false
+check_untyped_defs = false

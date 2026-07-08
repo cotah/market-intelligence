@@ -5,7 +5,6 @@ Cobre o service (seed/get/save/to_dict) com uma sessao fake em memoria
 """
 
 from agents.base import PipelineContext
-from agents.founder_compatibility import FounderCompatibilityAgent
 from core.founder_profile_service import get_profile, profile_to_dict, save_profile
 from models import FounderProfile
 

@@ -12,7 +12,6 @@ Cobre:
 - serie vazia -> None (sem dado nao e dado)
 """
 
-import pytest
 
 from integrations import google_trends
 
