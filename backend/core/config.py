@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # Vazia = endpoints de controle desabilitados (fail closed, 503).
     control_api_key: str = ""
 
+    # Chave DEDICADA dos endpoints de LEITURA (opportunities, founder-profile,
+    # reports, pipeline status). Fecha o backend apos o achado I-1 da auditoria:
+    # as leituras deixam de ser publicas. O frontend envia via proxy server-side
+    # (/api/data/*); a chave nunca chega ao browser. Vazia = leitura desligada
+    # (fail closed, 503).
+    read_api_key: str = ""
+
     # --- Pipeline ---
     # No modo continuo a pipeline se auto-encadeia (ao terminar uma rodada
     # ja inicia a proxima). Por isso `pipeline_interval_seconds` deixa de ser

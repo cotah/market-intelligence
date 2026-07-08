@@ -8,8 +8,8 @@ CONTROL_API_KEY (header X-API-Key), no mesmo padrao da Research API:
 Protegidos: POST /pipeline/start, POST /pipeline/stop,
 POST /pipeline/run-once, PUT /founder-profile, POST /reports/daily/generate.
 
-Leituras (GET) continuam publicas — o frontend le status/oportunidades
-sem chave.
+Leituras (GET) agora exigem READ_API_KEY (achado I-1 da auditoria);
+ver tests/test_read_auth.py para o contrato completo.
 """
 
 import httpx
@@ -23,6 +23,9 @@ from main import app
 
 TEST_KEY = "test-control-key"
 HEADERS = {"X-API-Key": TEST_KEY}
+
+TEST_READ_KEY = "test-read-key"
+READ_HEADERS = {"X-API-Key": TEST_READ_KEY}
 
 # (metodo, caminho) de todos os endpoints protegidos.
 PROTECTED = [
@@ -43,6 +46,7 @@ def _client() -> httpx.AsyncClient:
 def configured_key(monkeypatch):
     """Chave de controle configurada por padrao; testes especificos limpam."""
     monkeypatch.setattr(settings, "control_api_key", TEST_KEY)
+    monkeypatch.setattr(settings, "read_api_key", TEST_READ_KEY)
     yield
     app.dependency_overrides.clear()
 
@@ -102,8 +106,8 @@ async def test_put_founder_profile_succeeds_with_valid_key(monkeypatch):
     assert resp.json()["name"] == "Henrique"
 
 
-# --------------------------- GETs continuam publicos ---------------------------
-async def test_get_founder_profile_stays_public(monkeypatch):
+# --------------- GETs agora exigem READ_API_KEY (achado I-1) ----------------
+async def test_get_founder_profile_requires_read_key(monkeypatch):
     import api.routes as routes
 
     async def fake_get(session):
@@ -117,15 +121,25 @@ async def test_get_founder_profile_stays_public(monkeypatch):
 
     app.dependency_overrides[get_session] = fake_session
 
+    # Sem chave => 401 (achado I-1: leitura nao e mais publica).
     async with _client() as client:
-        resp = await client.get("/founder-profile")  # sem X-API-Key
+        resp = await client.get("/founder-profile")
+    assert resp.status_code == 401
+    # Com a READ_API_KEY correta => 200.
+    async with _client() as client:
+        resp = await client.get("/founder-profile", headers=READ_HEADERS)
     assert resp.status_code == 200
 
 
-async def test_pipeline_status_stays_public(monkeypatch):
+async def test_pipeline_status_requires_read_key(monkeypatch):
     monkeypatch.setattr(pipeline_control, "is_enabled", lambda: False)
     monkeypatch.setattr(pipeline_control, "redis_available", lambda: False)
     monkeypatch.setattr(pipeline_control, "get_status", lambda: {})
+    # Sem chave => 401.
     async with _client() as client:
-        resp = await client.get("/pipeline/status")  # sem X-API-Key
+        resp = await client.get("/pipeline/status")
+    assert resp.status_code == 401
+    # Com a READ_API_KEY correta => 200.
+    async with _client() as client:
+        resp = await client.get("/pipeline/status", headers=READ_HEADERS)
     assert resp.status_code == 200

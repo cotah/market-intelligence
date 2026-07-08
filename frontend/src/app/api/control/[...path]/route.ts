@@ -7,6 +7,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
+
+export const runtime = "nodejs";
+
 const BACKEND_URL =
   process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -25,6 +29,15 @@ async function proxy(
   req: NextRequest,
   params: Promise<{ path: string[] }>,
 ): Promise<NextResponse> {
+  const secret = process.env.SESSION_SECRET ?? "";
+  const session = await verifySessionToken(
+    req.cookies.get(SESSION_COOKIE)?.value,
+    secret,
+  );
+  if (!session) {
+    return NextResponse.json({ detail: "Nao autenticado" }, { status: 401 });
+  }
+
   const { path } = await params;
   const target = path.join("/");
 

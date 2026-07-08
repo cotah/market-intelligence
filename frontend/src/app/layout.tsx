@@ -27,6 +27,12 @@ export default function RootLayout({
               <NavLink href="/" label="Dashboard" />
               <NavLink href="/reports" label="Relatorios" />
               <NavLink href="/profile" label="Perfil" />
+              <a
+                href="/api/auth/logout"
+                className="rounded px-3 py-1.5 text-zinc-400 transition hover:text-zinc-100"
+              >
+                Sair
+              </a>
             </nav>
           </div>
         </header>

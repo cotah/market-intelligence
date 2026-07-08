@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.auth import require_control_key
+from api.auth import require_control_key, require_read_key
 from api.schemas import (
     DailyReportOut,
     FounderProfileSchema,
@@ -31,7 +31,11 @@ router = APIRouter()
 
 
 # ----------------------------- Opportunities -----------------------------
-@router.get("/opportunities", response_model=list[OpportunityListItem])
+@router.get(
+    "/opportunities",
+    response_model=list[OpportunityListItem],
+    dependencies=[Depends(require_read_key)],
+)
 async def list_opportunities(
     session: AsyncSession = Depends(get_session),
     score_min: float | None = Query(default=None, ge=0, le=10),
@@ -50,7 +54,11 @@ async def list_opportunities(
     return list(result.scalars().all())
 
 
-@router.get("/opportunities/{opportunity_id}", response_model=OpportunityOut)
+@router.get(
+    "/opportunities/{opportunity_id}",
+    response_model=OpportunityOut,
+    dependencies=[Depends(require_read_key)],
+)
 async def get_opportunity(
     opportunity_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -62,7 +70,11 @@ async def get_opportunity(
 
 
 # --------------------------- Founder Profile ----------------------------
-@router.get("/founder-profile", response_model=FounderProfileSchema)
+@router.get(
+    "/founder-profile",
+    response_model=FounderProfileSchema,
+    dependencies=[Depends(require_read_key)],
+)
 async def read_founder_profile(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
@@ -85,7 +97,11 @@ async def update_founder_profile(
 
 
 # ------------------------------- Reports --------------------------------
-@router.get("/reports/daily", response_model=list[DailyReportOut])
+@router.get(
+    "/reports/daily",
+    response_model=list[DailyReportOut],
+    dependencies=[Depends(require_read_key)],
+)
 async def list_daily_reports(
     session: AsyncSession = Depends(get_session),
     limit: int = Query(default=30, ge=1, le=365),
@@ -95,7 +111,11 @@ async def list_daily_reports(
     return list(result.scalars().all())
 
 
-@router.get("/reports/daily/latest", response_model=DailyReportOut)
+@router.get(
+    "/reports/daily/latest",
+    response_model=DailyReportOut,
+    dependencies=[Depends(require_read_key)],
+)
 async def latest_daily_report(
     session: AsyncSession = Depends(get_session),
 ) -> DailyReport:
@@ -170,7 +190,11 @@ async def stop_pipeline() -> PipelineActionOut:
     return PipelineActionOut(ok=ok, message=msg)
 
 
-@router.get("/pipeline/status", response_model=PipelineStatusOut)
+@router.get(
+    "/pipeline/status",
+    response_model=PipelineStatusOut,
+    dependencies=[Depends(require_read_key)],
+)
 async def pipeline_status() -> PipelineStatusOut:
     return PipelineStatusOut(
         enabled=pipeline_control.is_enabled(),

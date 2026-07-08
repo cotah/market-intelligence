@@ -1,8 +1,8 @@
-// Cliente do backend.
-// - Leituras vao direto ao backend (NEXT_PUBLIC_API_URL).
-// - Acoes de CONTROLE (pipeline, perfil, gerar relatorio) passam pelo proxy
-//   server-side /api/control/*, que injeta a chave CONTROL_API_KEY —
-//   a chave nunca chega ao navegador.
+// Cliente do backend. Tudo passa por proxies server-side no proprio Next.js;
+// o navegador nunca fala direto com o backend nem conhece nenhuma chave.
+// - Leituras   -> /api/data/*    (injeta READ_API_KEY)
+// - Controle   -> /api/control/* (injeta CONTROL_API_KEY)
+// Ambos exigem sessao valida (ver src/middleware.ts).
 
 import type {
   DailyReport,
@@ -56,6 +56,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // Prefixo das acoes de controle: passam pelo proxy server-side.
 const CONTROL = "/api/control";
+// Prefixo das leituras: passam pelo proxy server-side (injeta READ_API_KEY).
+const DATA = "/api/data";
 
 export interface OpportunityFilters {
   scoreMin?: number;
@@ -63,24 +65,24 @@ export interface OpportunityFilters {
 }
 
 export const api = {
-  health: () => request<{ status: string }>("/health"),
+  health: () => request<{ status: string }>(`${DATA}/health`),
 
   listOpportunities: (filters: OpportunityFilters = {}) => {
     const params = new URLSearchParams();
     if (filters.scoreMin != null) params.set("score_min", String(filters.scoreMin));
     if (filters.status) params.set("status", filters.status);
     const qs = params.toString();
-    return request<OpportunityListItem[]>(`/opportunities${qs ? `?${qs}` : ""}`);
+    return request<OpportunityListItem[]>(`${DATA}/opportunities${qs ? `?${qs}` : ""}`);
   },
 
-  getOpportunity: (id: string) => request<Opportunity>(`/opportunities/${id}`),
+  getOpportunity: (id: string) => request<Opportunity>(`${DATA}/opportunities/${id}`),
 
-  listDailyReports: () => request<DailyReport[]>("/reports/daily"),
-  latestDailyReport: () => request<DailyReport>("/reports/daily/latest"),
+  listDailyReports: () => request<DailyReport[]>(`${DATA}/reports/daily`),
+  latestDailyReport: () => request<DailyReport>(`${DATA}/reports/daily/latest`),
   generateDailyReport: () =>
     request<PipelineAction>(`${CONTROL}/reports/daily/generate`, { method: "POST" }),
 
-  pipelineStatus: () => request<PipelineStatus>("/pipeline/status"),
+  pipelineStatus: () => request<PipelineStatus>(`${DATA}/pipeline/status`),
   startPipeline: () =>
     request<PipelineAction>(`${CONTROL}/pipeline/start`, { method: "POST" }),
   stopPipeline: () =>
