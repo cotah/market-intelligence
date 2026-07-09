@@ -16,6 +16,7 @@ import asyncio
 import traceback
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
+from agents.persona import build_system
 from core import llm
 from core.logging_config import get_logger
 from core.text import to_hashtag
@@ -29,7 +30,9 @@ _MIN_PAIN_EVIDENCES = 3
 # run do Apify (custo!), entao limitamos aos posts com mais comentarios.
 _COMMENTS_POSTS_PER_SOURCE = 2
 
-_SYSTEM = (
+# Persona JUPITER (neutra, sem portfolio_context = busca aberta) + instrucao
+# especifica deste agente, que ancora o contrato JSON pedido no prompt.
+_SYSTEM = build_system(
     "You analyze user discussions to find REAL pain points behind a topic. "
     "You only report pains that have concrete evidence (a quote or paraphrase "
     "from a real complaint). Do not invent pains."

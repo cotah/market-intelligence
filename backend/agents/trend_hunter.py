@@ -14,6 +14,7 @@ import traceback
 from datetime import date
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
+from agents.persona import build_system
 from core import llm
 from core.exceptions import AgentException
 from core.logging_config import get_logger
@@ -29,7 +30,9 @@ _TREND_MAP = {
     "falling": ("decreasing", "low"),
 }
 
-_SYSTEM = (
+# Persona JUPITER (neutra, sem portfolio_context = busca aberta) + instrucao
+# especifica deste agente, que ancora o contrato JSON pedido no prompt.
+_SYSTEM = build_system(
     "You are a trend analyst that finds emerging business opportunities. "
     "You identify topics that are growing in interest RIGHT NOW and could "
     "become viable software/SaaS businesses."

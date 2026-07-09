@@ -10,13 +10,16 @@ Scorer, nao motivo de eliminacao automatica.
 import traceback
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
+from agents.persona import build_system
 from core import llm
 from core.logging_config import get_logger
 from integrations import perplexity, serper
 
 log = get_logger("agents.competitor_hunter")
 
-_SYSTEM = (
+# Persona JUPITER (neutra, sem portfolio_context = busca aberta) + instrucao
+# especifica deste agente, que ancora o contrato JSON pedido no prompt.
+_SYSTEM = build_system(
     "You map the competitive landscape for a software/SaaS idea. You list "
     "real competitors with pricing and, crucially, the weaknesses users "
     "complain about. Be concrete; do not invent companies."
