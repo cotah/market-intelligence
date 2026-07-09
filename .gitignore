@@ -31,3 +31,6 @@ Thumbs.db
 **/out/
 
 .vercel
+
+# Dumps brutos de auditoria/transcript (Capivarex)
+capivarex_*.txt
