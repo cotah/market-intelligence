@@ -8,6 +8,7 @@ Os agentes 3-11 serao adicionados a `self.agents` na Fase 2, sem mudar
 a estrutura de orquestracao.
 """
 
+import uuid
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -82,16 +83,21 @@ class Pipeline:
             ProjectGeneratorAgent(),       # so gera plano se score >= MIN_SCORE_FOR_PROJECT_PLAN
         ]
 
-    async def run_once(self, session: AsyncSession, topics_limit: int | None = None) -> dict:
-        """Roda uma rodada completa: descobre topicos e processa cada um.
+    async def run_once(
+        self,
+        session: AsyncSession,
+        account_id: uuid.UUID,
+        topics_limit: int | None = None,
+    ) -> dict:
+        """Roda uma rodada completa PARA UMA CONTA: descobre topicos e processa cada um.
 
         Retorna um resumo {topics, completed, discarded, opportunity_ids}.
         """
         limit = topics_limit or settings.pipeline_topics_per_run
-        log.info("pipeline.run_once.started", topics_limit=limit)
+        log.info("pipeline.run_once.started", topics_limit=limit, account_id=str(account_id))
 
-        # Carrega o perfil do fundador uma vez por rodada (compartilhado entre topicos).
-        profile = profile_to_dict(await get_profile(session))
+        # Carrega o perfil do fundador DA CONTA uma vez por rodada.
+        profile = profile_to_dict(await get_profile(session, account_id))
 
         discovery = await self.trend_hunter.discover_topics(limit=limit)
         topics = discovery.get("topics", [])
@@ -122,7 +128,7 @@ class Pipeline:
                 position=f"{index}/{len(topics)}",
                 topic=topic_data.get("name", "?"),
             )
-            opp = await self._process_topic(session, topic_data, profile)
+            opp = await self._process_topic(session, account_id, topic_data, profile)
             summary["opportunity_ids"].append(str(opp.id))
             if opp.status == OpportunityStatus.DISCARDED:
                 summary["discarded"] += 1
@@ -150,6 +156,7 @@ class Pipeline:
     async def _process_topic(
         self,
         session: AsyncSession,
+        account_id: uuid.UUID,
         topic_data: dict,
         profile: dict | None = None,
         *,
@@ -159,6 +166,7 @@ class Pipeline:
         topic_name = topic_data.get("name", "Unknown topic")
 
         opp = Opportunity(
+            account_id=account_id,
             title=topic_name,
             topic_origin=topic_name,
             source=source,
@@ -280,7 +288,11 @@ class Pipeline:
         return opp
 
     async def run_for_idea(
-        self, session: AsyncSession, idea: dict, profile: dict | None = None
+        self,
+        session: AsyncSession,
+        account_id: uuid.UUID,
+        idea: dict,
+        profile: dict | None = None,
     ) -> Opportunity:
         """Modo Ideia: analisa um produto/ideia trazido pelo fundador em vez de
         descobrir topicos (pula o Trend Hunter). Roda os mesmos agentes de
@@ -289,7 +301,7 @@ class Pipeline:
         name = (str(idea.get("name") or "").strip()[:200]) or "Ideia sem nome"
         description = str(idea.get("description") or "").strip()[:2000]
         if profile is None:
-            profile = profile_to_dict(await get_profile(session))
+            profile = profile_to_dict(await get_profile(session, account_id))
         topic_data = {
             "name": name,
             "description": description,
@@ -299,6 +311,7 @@ class Pipeline:
         log.info("pipeline.run_for_idea.started", idea=name)
         opp = await self._process_topic(
             session,
+            account_id,
             topic_data,
             profile,
             source="founder_idea",

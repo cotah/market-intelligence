@@ -30,6 +30,7 @@ from api.schemas import OpportunityOut, ResearchOpportunitiesOut
 from core.config import settings
 from core.database import get_session
 from core.logging_config import get_logger
+from core.tenancy import require_account_id
 from models import Opportunity, OpportunityStatus
 
 log = get_logger("api.research")
@@ -98,6 +99,7 @@ def _mock_opportunities() -> list[OpportunityOut]:
 @router.get("/opportunities", response_model=ResearchOpportunitiesOut)
 async def research_list_opportunities(
     _: None = Depends(require_research_key),
+    account_id: uuid.UUID = Depends(require_account_id),
     session: AsyncSession = Depends(get_session),
     score_min: float | None = Query(default=None, ge=0, le=10),
     status: OpportunityStatus | None = Query(default=None),
@@ -113,7 +115,7 @@ async def research_list_opportunities(
         log.info("research.list.mock", count=len(items))
         return ResearchOpportunitiesOut(count=len(items), mock=True, opportunities=items)
 
-    stmt = select(Opportunity)
+    stmt = select(Opportunity).where(Opportunity.account_id == account_id)
     if score_min is not None:
         stmt = stmt.where(Opportunity.score_total >= score_min)
     if status is not None:
@@ -142,11 +144,13 @@ async def research_list_opportunities(
 async def research_get_opportunity(
     opportunity_id: uuid.UUID,
     _: None = Depends(require_research_key),
+    account_id: uuid.UUID = Depends(require_account_id),
     session: AsyncSession = Depends(get_session),
 ) -> Opportunity:
     """Detalhe completo de uma oportunidade (dados dos 11 agentes)."""
     opp = await session.get(Opportunity, opportunity_id)
-    if opp is None:
+    # Oportunidade de outra conta => 404 (nao revela existencia de dado alheio).
+    if opp is None or opp.account_id != account_id:
         log.info("research.get.not_found", opportunity_id=str(opportunity_id))
         raise HTTPException(status_code=404, detail="Opportunity not found")
     log.info("research.get.completed", opportunity_id=str(opportunity_id))

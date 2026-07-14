@@ -4,18 +4,23 @@ Cobre o service (seed/get/save/to_dict) com uma sessao fake em memoria
 (sem precisar de Postgres) e a ponderacao geografica do Agente 6.
 """
 
+import uuid
+
 from agents.base import PipelineContext
 from core.founder_profile_service import get_profile, profile_to_dict, save_profile
 from models import FounderProfile
+
+# Conta usada nos testes do service (1 perfil POR conta).
+ACC = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 class FakeSession:
     """Sessao async minima: simula get/add/flush sem banco real."""
 
     def __init__(self, existing: FounderProfile | None = None) -> None:
-        self._store: dict[int, FounderProfile] = {}
+        self._store: dict[uuid.UUID, FounderProfile] = {}
         if existing is not None:
-            self._store[existing.id] = existing
+            self._store[existing.account_id] = existing
         self.added: list[FounderProfile] = []
         self.flushed = 0
 
@@ -24,7 +29,7 @@ class FakeSession:
 
     def add(self, obj: FounderProfile) -> None:
         self.added.append(obj)
-        self._store[obj.id] = obj
+        self._store[obj.account_id] = obj
 
     async def flush(self) -> None:
         self.flushed += 1
@@ -33,9 +38,9 @@ class FakeSession:
 # -------------------------------- Service --------------------------------
 async def test_get_profile_seeds_from_default_when_missing():
     session = FakeSession()
-    profile = await get_profile(session)
+    profile = await get_profile(session, ACC)
 
-    assert profile.id == 1
+    assert profile.account_id == ACC
     # Pais derivado do default ("Dublin, Ireland" -> "Ireland").
     assert profile.current_country == "Ireland"
     assert profile in session.added
@@ -43,10 +48,10 @@ async def test_get_profile_seeds_from_default_when_missing():
 
 
 async def test_get_profile_returns_existing_without_seeding():
-    existing = FounderProfile(id=1, name="Henrique", current_country="Brazil")
+    existing = FounderProfile(account_id=ACC, name="Henrique", current_country="Brazil")
     session = FakeSession(existing=existing)
 
-    profile = await get_profile(session)
+    profile = await get_profile(session, ACC)
 
     assert profile is existing
     assert session.added == []
@@ -54,12 +59,12 @@ async def test_get_profile_returns_existing_without_seeding():
 
 async def test_save_profile_updates_only_provided_fields():
     existing = FounderProfile(
-        id=1, name="Old", current_country="Ireland", active_markets=["Ireland"]
+        account_id=ACC, name="Old", current_country="Ireland", active_markets=["Ireland"]
     )
     session = FakeSession(existing=existing)
 
     saved = await save_profile(
-        session, {"current_country": "Brazil", "active_markets": ["Brazil", "Portugal"]}
+        session, ACC, {"current_country": "Brazil", "active_markets": ["Brazil", "Portugal"]}
     )
 
     assert saved.current_country == "Brazil"
@@ -71,15 +76,15 @@ async def test_save_profile_updates_only_provided_fields():
 async def test_save_profile_creates_when_missing():
     session = FakeSession()
 
-    saved = await save_profile(session, {"name": "New", "current_country": "Spain"})
+    saved = await save_profile(session, ACC, {"name": "New", "current_country": "Spain"})
 
-    assert saved.id == 1
+    assert saved.account_id == ACC
     assert saved.name == "New"
     assert saved in session.added
 
 
 def test_profile_to_dict_coerces_none_lists_to_empty():
-    p = FounderProfile(id=1, name="A", current_country="Ireland")
+    p = FounderProfile(account_id=ACC, name="A", current_country="Ireland")
     p.active_markets = None  # JSONB ainda nao materializado (sem flush no banco)
 
     d = profile_to_dict(p)

@@ -1,13 +1,17 @@
-"""Perfil do fundador persistido no banco (registro unico, id=1).
+"""Perfil do fundador persistido no banco (1 registro POR conta).
 
 Editavel pela tela /profile do frontend. O Agente 6 carrega este perfil
 em vez do hardcoded, para refletir mudancas de pais, mercados e skills.
+
+Multi-tenancy: a PK e o account_id — cada cliente tem o proprio perfil,
+semeado do default no primeiro acesso (core/founder_profile_service.py).
 """
 
 from datetime import datetime
+import uuid
 
-from sqlalchemy import Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
@@ -16,8 +20,8 @@ from models.base import Base
 class FounderProfile(Base):
     __tablename__ = "founder_profile"
 
-    # Singleton: sempre id=1.
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=1)
+    # PK = conta dona do perfil (1 perfil por conta).
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
 
     name: Mapped[str] = mapped_column(String(200), default="")
     current_country: Mapped[str] = mapped_column(String(200), default="")

@@ -20,7 +20,8 @@ from main import app
 from models import Opportunity, OpportunityStatus
 
 TEST_KEY = "test-research-key"
-HEADERS = {"X-API-Key": TEST_KEY}
+ACC = uuid.UUID("00000000-0000-0000-0000-000000000001")
+HEADERS = {"X-API-Key": TEST_KEY, "X-Account-Id": str(ACC)}
 URL = "/integrations/research/opportunities"
 
 
@@ -34,6 +35,7 @@ def _opportunity(**overrides) -> Opportunity:
     now = datetime(2026, 6, 26, 12, 0, 0)
     defaults = dict(
         id=uuid.uuid4(),
+        account_id=ACC,
         title="Vertical AI SaaS",
         summary="",
         topic_origin="Vertical AI SaaS",

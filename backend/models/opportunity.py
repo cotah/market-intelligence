@@ -9,12 +9,16 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Float, Index, String, Text, func
+from sqlalchemy import Float, Index, String, Text, func, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
+
+# server_default do account_id: workspace do dono (backfill pre-multi-tenant).
+# Mantido em sync com core.tenancy.OWNER_ACCOUNT_ID.
+_OWNER_ACCOUNT_DEFAULT = text("'00000000-0000-0000-0000-000000000001'")
 
 
 class OpportunityStatus(str, Enum):
@@ -31,6 +35,13 @@ class Opportunity(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+
+    # --- Multi-tenancy: conta dona desta oportunidade ---
+    # O codigo SEMPRE carimba explicitamente; o server_default cobre apenas
+    # o backfill de linhas antigas (workspace do dono).
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, server_default=_OWNER_ACCOUNT_DEFAULT
     )
 
     # --- Identificacao ---
@@ -75,6 +86,9 @@ class Opportunity(Base):
         Index("ix_opportunities_score_total", "score_total"),
         Index("ix_opportunities_created_at", "created_at"),
         Index("ix_opportunities_status", "status"),
+        # Indices compostos: toda leitura da API filtra por account_id.
+        Index("ix_opportunities_account_created", "account_id", "created_at"),
+        Index("ix_opportunities_account_score", "account_id", "score_total"),
     )
 
     def __repr__(self) -> str:

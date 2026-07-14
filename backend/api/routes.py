@@ -2,6 +2,10 @@
 
 A logica de negocio fica nos agentes / pipeline; aqui so orquestramos
 acesso ao banco e disparo de tarefas.
+
+Multi-tenancy: TODO endpoint exige X-Account-Id (core/tenancy.py).
+Sem header => 400. Toda leitura filtra por account_id e toda escrita
+carimba o account_id — nunca ha fallback para dado global.
 """
 
 import uuid
@@ -24,6 +28,7 @@ from core import pipeline_control
 from core.database import get_session
 from core.founder_profile_service import get_profile, profile_to_dict, save_profile
 from core.logging_config import get_logger
+from core.tenancy import require_account_id
 from models import DailyReport, Opportunity, OpportunityStatus
 
 log = get_logger("api")
@@ -38,13 +43,14 @@ router = APIRouter()
     dependencies=[Depends(require_read_key)],
 )
 async def list_opportunities(
+    account_id: uuid.UUID = Depends(require_account_id),
     session: AsyncSession = Depends(get_session),
     score_min: float | None = Query(default=None, ge=0, le=10),
     status: OpportunityStatus | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> list[Opportunity]:
-    stmt = select(Opportunity)
+    stmt = select(Opportunity).where(Opportunity.account_id == account_id)
     if score_min is not None:
         stmt = stmt.where(Opportunity.score_total >= score_min)
     if status is not None:
@@ -62,10 +68,13 @@ async def list_opportunities(
 )
 async def get_opportunity(
     opportunity_id: uuid.UUID,
+    account_id: uuid.UUID = Depends(require_account_id),
     session: AsyncSession = Depends(get_session),
 ) -> Opportunity:
     opp = await session.get(Opportunity, opportunity_id)
-    if opp is None:
+    # Oportunidade de OUTRA conta => 404 (mesma resposta de "nao existe",
+    # para nao revelar a existencia de dados alheios).
+    if opp is None or opp.account_id != account_id:
         raise HTTPException(status_code=404, detail="Opportunity not found")
     return opp
 
@@ -82,7 +91,10 @@ class IdeaIn(BaseModel):
     response_model=PipelineActionOut,
     dependencies=[Depends(require_control_key)],
 )
-async def create_opportunity_from_idea(payload: IdeaIn) -> PipelineActionOut:
+async def create_opportunity_from_idea(
+    payload: IdeaIn,
+    account_id: uuid.UUID = Depends(require_account_id),
+) -> PipelineActionOut:
     """Modo Ideia: o fundador traz um produto/ideia e a pipeline analisa em cima
     dela (dor, concorrencia, mercado, IA, monetizacao, score, plano), SEM
     descobrir topicos. A compatibilidade com o fundador vira informativa (nao
@@ -90,7 +102,7 @@ async def create_opportunity_from_idea(payload: IdeaIn) -> PipelineActionOut:
     try:
         from workers.pipeline_worker import run_for_idea_task
 
-        task = run_for_idea_task.delay(payload.model_dump())
+        task = run_for_idea_task.delay(payload.model_dump(), account_id=str(account_id))
         return PipelineActionOut(
             ok=True, message="Ideia enfileirada para analise.", task_id=str(task.id)
         )
@@ -106,9 +118,10 @@ async def create_opportunity_from_idea(payload: IdeaIn) -> PipelineActionOut:
     dependencies=[Depends(require_read_key)],
 )
 async def read_founder_profile(
+    account_id: uuid.UUID = Depends(require_account_id),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    profile = await get_profile(session)
+    profile = await get_profile(session, account_id)
     return profile_to_dict(profile)
 
 
@@ -119,10 +132,11 @@ async def read_founder_profile(
 )
 async def update_founder_profile(
     payload: FounderProfileSchema,
+    account_id: uuid.UUID = Depends(require_account_id),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    profile = await save_profile(session, payload.model_dump())
-    log.info("api.founder_profile.updated")
+    profile = await save_profile(session, account_id, payload.model_dump())
+    log.info("api.founder_profile.updated", account_id=str(account_id))
     return profile_to_dict(profile)
 
 
@@ -133,10 +147,16 @@ async def update_founder_profile(
     dependencies=[Depends(require_read_key)],
 )
 async def list_daily_reports(
+    account_id: uuid.UUID = Depends(require_account_id),
     session: AsyncSession = Depends(get_session),
     limit: int = Query(default=30, ge=1, le=365),
 ) -> list[DailyReport]:
-    stmt = select(DailyReport).order_by(desc(DailyReport.report_date)).limit(limit)
+    stmt = (
+        select(DailyReport)
+        .where(DailyReport.account_id == account_id)
+        .order_by(desc(DailyReport.report_date))
+        .limit(limit)
+    )
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -147,9 +167,15 @@ async def list_daily_reports(
     dependencies=[Depends(require_read_key)],
 )
 async def latest_daily_report(
+    account_id: uuid.UUID = Depends(require_account_id),
     session: AsyncSession = Depends(get_session),
 ) -> DailyReport:
-    stmt = select(DailyReport).order_by(desc(DailyReport.report_date)).limit(1)
+    stmt = (
+        select(DailyReport)
+        .where(DailyReport.account_id == account_id)
+        .order_by(desc(DailyReport.report_date))
+        .limit(1)
+    )
     result = await session.execute(stmt)
     report = result.scalar_one_or_none()
     if report is None:
@@ -162,12 +188,14 @@ async def latest_daily_report(
     response_model=PipelineActionOut,
     dependencies=[Depends(require_control_key)],
 )
-async def generate_daily_report() -> PipelineActionOut:
+async def generate_daily_report(
+    account_id: uuid.UUID = Depends(require_account_id),
+) -> PipelineActionOut:
     """Gera o relatorio diario sob demanda (enfileira no Celery)."""
     try:
         from workers.pipeline_worker import generate_daily_report_task
 
-        task = generate_daily_report_task.delay()
+        task = generate_daily_report_task.delay(account_id=str(account_id))
         return PipelineActionOut(ok=True, message="Relatorio diario enfileirado.", task_id=str(task.id))
     except Exception as e:  # noqa: BLE001
         log.error("api.daily_report_failed", error=str(e))
@@ -180,13 +208,15 @@ async def generate_daily_report() -> PipelineActionOut:
     response_model=PipelineActionOut,
     dependencies=[Depends(require_control_key)],
 )
-async def start_pipeline() -> PipelineActionOut:
-    """Liga o modo continuo e ja inicia a primeira rodada.
+async def start_pipeline(
+    account_id: uuid.UUID = Depends(require_account_id),
+) -> PipelineActionOut:
+    """Liga o modo continuo DESTA conta e ja inicia a primeira rodada.
 
     A partir daqui cada rodada se auto-encadeia (workers.pipeline_worker.
     scheduled_run) ate o Stop. Nao esperamos o Beat para comecar.
     """
-    ok = pipeline_control.set_enabled(True)
+    ok = pipeline_control.set_enabled(str(account_id), True)
     if not ok:
         return PipelineActionOut(ok=False, message="Falha ao habilitar (Redis indisponivel).")
 
@@ -194,7 +224,7 @@ async def start_pipeline() -> PipelineActionOut:
     try:
         from workers.pipeline_worker import scheduled_run
 
-        task = scheduled_run.delay()
+        task = scheduled_run.delay(account_id=str(account_id))
         return PipelineActionOut(
             ok=True,
             message="Pipeline ligada em modo continuo. Primeira rodada iniciada.",
@@ -214,8 +244,10 @@ async def start_pipeline() -> PipelineActionOut:
     response_model=PipelineActionOut,
     dependencies=[Depends(require_control_key)],
 )
-async def stop_pipeline() -> PipelineActionOut:
-    ok = pipeline_control.set_enabled(False)
+async def stop_pipeline(
+    account_id: uuid.UUID = Depends(require_account_id),
+) -> PipelineActionOut:
+    ok = pipeline_control.set_enabled(str(account_id), False)
     msg = "Pipeline desabilitada." if ok else "Falha ao desabilitar (Redis indisponivel)."
     return PipelineActionOut(ok=ok, message=msg)
 
@@ -225,11 +257,14 @@ async def stop_pipeline() -> PipelineActionOut:
     response_model=PipelineStatusOut,
     dependencies=[Depends(require_read_key)],
 )
-async def pipeline_status() -> PipelineStatusOut:
+async def pipeline_status(
+    account_id: uuid.UUID = Depends(require_account_id),
+) -> PipelineStatusOut:
+    acc = str(account_id)
     return PipelineStatusOut(
-        enabled=pipeline_control.is_enabled(),
+        enabled=pipeline_control.is_enabled(acc),
         redis_available=pipeline_control.redis_available(),
-        last_run=pipeline_control.get_status() or None,
+        last_run=pipeline_control.get_status(acc) or None,
     )
 
 
@@ -238,7 +273,9 @@ async def pipeline_status() -> PipelineStatusOut:
     response_model=PipelineActionOut,
     dependencies=[Depends(require_control_key)],
 )
-async def run_pipeline_once() -> PipelineActionOut:
+async def run_pipeline_once(
+    account_id: uuid.UUID = Depends(require_account_id),
+) -> PipelineActionOut:
     """Enfileira uma rodada unica no Celery e retorna o id da tarefa.
 
     Requer o worker Celery rodando. Se o broker estiver fora, retorna erro claro.
@@ -246,7 +283,7 @@ async def run_pipeline_once() -> PipelineActionOut:
     try:
         from workers.pipeline_worker import run_pipeline_once_task
 
-        task = run_pipeline_once_task.delay()
+        task = run_pipeline_once_task.delay(account_id=str(account_id))
         return PipelineActionOut(ok=True, message="Rodada enfileirada.", task_id=str(task.id))
     except Exception as e:  # noqa: BLE001
         log.error("api.run_once_failed", error=str(e))

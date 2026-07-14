@@ -10,7 +10,8 @@ from core.database import get_session
 from main import app
 
 READ_KEY = "test-read-key"
-HEAD = {"X-API-Key": READ_KEY}
+ACC = "00000000-0000-0000-0000-000000000001"
+HEAD = {"X-API-Key": READ_KEY, "X-Account-Id": ACC}
 
 
 class FakeResult:

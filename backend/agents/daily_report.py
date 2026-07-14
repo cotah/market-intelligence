@@ -9,6 +9,7 @@ Excelentes:  score_total >= MIN_SCORE_FOR_PROJECT_PLAN.
 
 import json
 import traceback
+import uuid
 from datetime import date, datetime, time
 
 from sqlalchemy import select
@@ -30,23 +31,33 @@ _SYSTEM = (
 class DailyReportAgent:
     name = "daily_report"
 
-    async def generate(self, session: AsyncSession, report_date: date | None = None) -> DailyReport:
+    async def generate(
+        self,
+        session: AsyncSession,
+        account_id: uuid.UUID,
+        report_date: date | None = None,
+    ) -> DailyReport:
         day = report_date or date.today()
         start = datetime.combine(day, time.min)
         end = datetime.combine(day, time.max)
-        log.info("daily_report.started", date=day.isoformat())
+        log.info("daily_report.started", date=day.isoformat(), account_id=str(account_id))
 
         stmt = select(Opportunity).where(
-            Opportunity.created_at >= start, Opportunity.created_at <= end
+            Opportunity.account_id == account_id,
+            Opportunity.created_at >= start,
+            Opportunity.created_at <= end,
         )
         result = await session.execute(stmt)
         opps = list(result.scalars().all())
 
         total_analyzed = len(opps)
         kept = [o for o in opps if o.score_total is not None]
-        promising = [o for o in kept if o.score_total >= settings.min_score_to_keep]
-        excellent = [o for o in kept if o.score_total >= settings.min_score_for_project_plan]
-        best = max(kept, key=lambda o: o.score_total, default=None)
+        # `kept` so tem score_total nao-nulo; o "or 0.0" e apenas para o mypy.
+        promising = [o for o in kept if (o.score_total or 0.0) >= settings.min_score_to_keep]
+        excellent = [
+            o for o in kept if (o.score_total or 0.0) >= settings.min_score_for_project_plan
+        ]
+        best = max(kept, key=lambda o: o.score_total or 0.0, default=None)
 
         summary_text = await self._llm_summary(day, total_analyzed, promising, excellent, best)
 
@@ -63,6 +74,7 @@ class DailyReportAgent:
         }
 
         report = DailyReport(
+            account_id=account_id,
             report_date=day,
             total_analyzed=total_analyzed,
             promising_count=len(promising),

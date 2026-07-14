@@ -22,10 +22,11 @@ from core.founder_profile import default_profile_dict
 from main import app
 
 TEST_KEY = "test-control-key"
-HEADERS = {"X-API-Key": TEST_KEY}
+ACC = "00000000-0000-0000-0000-000000000001"
+HEADERS = {"X-API-Key": TEST_KEY, "X-Account-Id": ACC}
 
 TEST_READ_KEY = "test-read-key"
-READ_HEADERS = {"X-API-Key": TEST_READ_KEY}
+READ_HEADERS = {"X-API-Key": TEST_READ_KEY, "X-Account-Id": ACC}
 
 # (metodo, caminho) de todos os endpoints protegidos.
 PROTECTED = [
@@ -76,7 +77,7 @@ async def test_returns_403_with_wrong_api_key(method, path):
 
 # ------------------------ Sucesso com a chave certa ------------------------
 async def test_stop_pipeline_succeeds_with_valid_key(monkeypatch):
-    monkeypatch.setattr(pipeline_control, "set_enabled", lambda value: True)
+    monkeypatch.setattr(pipeline_control, "set_enabled", lambda account_id, value: True)
     async with _client() as client:
         resp = await client.post("/pipeline/stop", headers=HEADERS)
     assert resp.status_code == 200
@@ -84,7 +85,7 @@ async def test_stop_pipeline_succeeds_with_valid_key(monkeypatch):
 
 
 async def test_put_founder_profile_succeeds_with_valid_key(monkeypatch):
-    async def fake_save(session, data):
+    async def fake_save(session, account_id, data):
         return data
 
     def fake_to_dict(profile):
@@ -110,7 +111,7 @@ async def test_put_founder_profile_succeeds_with_valid_key(monkeypatch):
 async def test_get_founder_profile_requires_read_key(monkeypatch):
     import api.routes as routes
 
-    async def fake_get(session):
+    async def fake_get(session, account_id):
         return default_profile_dict()
 
     monkeypatch.setattr(routes, "get_profile", fake_get)
@@ -132,9 +133,9 @@ async def test_get_founder_profile_requires_read_key(monkeypatch):
 
 
 async def test_pipeline_status_requires_read_key(monkeypatch):
-    monkeypatch.setattr(pipeline_control, "is_enabled", lambda: False)
+    monkeypatch.setattr(pipeline_control, "is_enabled", lambda account_id: False)
     monkeypatch.setattr(pipeline_control, "redis_available", lambda: False)
-    monkeypatch.setattr(pipeline_control, "get_status", lambda: {})
+    monkeypatch.setattr(pipeline_control, "get_status", lambda account_id: {})
     # Sem chave => 401.
     async with _client() as client:
         resp = await client.get("/pipeline/status")

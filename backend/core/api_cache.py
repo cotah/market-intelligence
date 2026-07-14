@@ -16,6 +16,7 @@ Regras:
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 import redis.asyncio as aioredis
 
@@ -34,6 +35,11 @@ def _make_key(source: str, key_parts: dict) -> str:
     return f"{_KEY_PREFIX}:{source}:{digest}"
 
 
+# Tipo do dado cacheado: o retorno de cached() e exatamente o tipo do fetch
+# (list[dict], dict, etc.) — cache nao muda a forma do dado.
+T = TypeVar("T")
+
+
 def _client() -> aioredis.Redis:
     return aioredis.Redis.from_url(settings.redis_url, decode_responses=True)
 
@@ -41,8 +47,8 @@ def _client() -> aioredis.Redis:
 async def cached(
     source: str,
     key_parts: dict,
-    fetch: Callable[[], Awaitable[list | dict | None]],
-) -> list | dict | None:
+    fetch: Callable[[], Awaitable[T]],
+) -> T:
     """Retorna o valor em cache para (source, key_parts) ou chama fetch().
 
     Resultado nao-vazio de fetch() e gravado com TTL de

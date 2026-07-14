@@ -11,12 +11,15 @@ from agents.base import AgentResult, BaseAgent, PipelineContext
 from core.pipeline import Pipeline
 from models import FounderProfile, Opportunity, OpportunityStatus
 
+# Conta dona das rodadas nos testes (multi-tenant).
+ACC = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 class FakeSession:
     """Sessao async minima: simula get/add/flush sem banco real."""
 
     def __init__(self) -> None:
-        self._profiles: dict[int, FounderProfile] = {}
+        self._profiles: dict[uuid.UUID, FounderProfile] = {}
         self.added: list = []
 
     async def get(self, model, pk):
@@ -27,7 +30,7 @@ class FakeSession:
     def add(self, obj) -> None:
         self.added.append(obj)
         if isinstance(obj, FounderProfile):
-            self._profiles[obj.id] = obj
+            self._profiles[obj.account_id] = obj
 
     async def flush(self) -> None:
         # Simula o default=uuid.uuid4 aplicado pelo banco no INSERT.
@@ -70,7 +73,7 @@ async def test_process_topic_completes_and_maps_data_to_jsonb_fields():
     competitor = FakeAgent("competitor_hunter", _ok({"competitors": [{"name": "A"}]}))
     p = _pipeline_with([problem, competitor])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
     assert opp.trend_data == TOPIC
@@ -94,7 +97,7 @@ async def test_process_topic_discard_stops_chain():
     after = FakeAgent("monetization", _ok({"models": ["saas"]}))
     p = _pipeline_with([first, discarder, after])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.DISCARDED
     assert opp.discarded_by == "founder_compatibility"
@@ -120,7 +123,7 @@ async def test_project_generator_skip_marker_is_persisted_in_project_plan():
     generator = FakeAgent("project_generator", _ok(skip_marker))
     p = _pipeline_with([scorer, generator])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
     assert not opp.failed_agents
@@ -131,7 +134,7 @@ async def test_scorer_sets_score_total():
     scorer = FakeAgent("scorer", _ok({"total": 8.7, "market": 9}))
     p = _pipeline_with([scorer])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     assert opp.score_total == 8.7
     assert opp.score_data == {"total": 8.7, "market": 9}
@@ -151,7 +154,7 @@ async def test_devils_advocate_fatal_flaws_set_risk_flag_without_changing_score(
     )
     p = _pipeline_with([scorer, da])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
     assert opp.score_data["risk_flag"] == "high"
@@ -175,7 +178,7 @@ async def test_devils_advocate_many_high_risks_set_risk_flag():
     )
     p = _pipeline_with([scorer, da])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     assert opp.score_data["risk_flag"] == "high"
 
@@ -188,7 +191,7 @@ async def test_devils_advocate_calm_does_not_set_risk_flag():
     )
     p = _pipeline_with([scorer, da])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     # 1 fatal flaw e 1 risco high: abaixo dos thresholds (2 e 3).
     assert "risk_flag" not in opp.score_data
@@ -204,7 +207,7 @@ async def test_run_once_with_no_topics_returns_empty_summary(monkeypatch):
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", no_topics)
 
-    summary = await p.run_once(FakeSession())
+    summary = await p.run_once(FakeSession(), ACC)
 
     assert summary["topics"] == 0
     assert summary["completed"] == 0
@@ -230,7 +233,7 @@ async def test_run_once_counts_completed_and_discarded(monkeypatch):
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", two_topics)
 
-    summary = await p.run_once(FakeSession())
+    summary = await p.run_once(FakeSession(), ACC)
 
     assert summary["topics"] == 2
     assert summary["completed"] == 1
@@ -254,7 +257,7 @@ async def test_topic_with_failed_agent_becomes_partial():
     ok_after = FakeAgent("monetization", _ok({"models": ["saas"]}))
     p = _pipeline_with([ok_before, failing, ok_after])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     # A cadeia continua (graceful degradation), mas o resultado e sinalizado.
     assert ok_after.ran is True
@@ -265,7 +268,7 @@ async def test_topic_with_failed_agent_becomes_partial():
 async def test_topic_with_all_agents_ok_stays_completed_without_failed_agents():
     p = _pipeline_with([FakeAgent("problem_hunter", _ok({"pain_phrases": ["x"]}))])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
     assert not opp.failed_agents  # None ou lista vazia — nunca falhas fantasma
@@ -281,7 +284,7 @@ async def test_failed_agents_recorded_even_when_discarded_later():
     )
     p = _pipeline_with([failing, discarder])
 
-    opp = await p._process_topic(FakeSession(), TOPIC)
+    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     # Descarte continua mandando no status final...
     assert opp.status == OpportunityStatus.DISCARDED
@@ -303,7 +306,7 @@ async def test_run_once_counts_partial_separately(monkeypatch):
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", one_topic)
 
-    summary = await p.run_once(FakeSession())
+    summary = await p.run_once(FakeSession(), ACC)
 
     # PARTIAL nao pode se esconder dentro de "completed".
     assert summary["partial"] == 1
@@ -317,7 +320,7 @@ async def test_run_for_idea_sets_source_and_runs_agents():
     p = _pipeline_with([problem])
 
     opp = await p.run_for_idea(
-        FakeSession(), {"name": "Coleira GPS", "description": "rastreador pet"}, profile={}
+        FakeSession(), ACC, {"name": "Coleira GPS", "description": "rastreador pet"}, profile={}
     )
 
     assert opp.source == "founder_idea"
@@ -338,7 +341,7 @@ async def test_run_for_idea_ignores_founder_compatibility_discard():
     after = FakeAgent("monetization", _ok({"models": ["saas"]}))
     p = _pipeline_with([problem, compat, after])
 
-    opp = await p.run_for_idea(FakeSession(), {"name": "X", "description": "y"}, profile={})
+    opp = await p.run_for_idea(FakeSession(), ACC, {"name": "X", "description": "y"}, profile={})
 
     # NAO descarta por compatibilidade; a cadeia continua ate o fim.
     assert opp.status != OpportunityStatus.DISCARDED
@@ -356,7 +359,7 @@ async def test_run_for_idea_still_discards_on_other_agents():
     after = FakeAgent("monetization", _ok())
     p = _pipeline_with([problem, after])
 
-    opp = await p.run_for_idea(FakeSession(), {"name": "X", "description": "y"}, profile={})
+    opp = await p.run_for_idea(FakeSession(), ACC, {"name": "X", "description": "y"}, profile={})
 
     assert opp.status == OpportunityStatus.DISCARDED
     assert opp.discarded_by == "problem_hunter"

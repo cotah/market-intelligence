@@ -1,8 +1,10 @@
-"""Acesso ao perfil do fundador no banco (registro unico, id=1).
+"""Acesso ao perfil do fundador no banco (1 registro POR conta).
 
-Semeia o perfil a partir do default na primeira leitura, para que o
-sistema sempre tenha um perfil valido.
+Semeia o perfil a partir do default na primeira leitura de cada conta,
+para que toda conta sempre tenha um perfil valido.
 """
+
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,22 +31,24 @@ _FIELDS = (
 )
 
 
-async def get_profile(session: AsyncSession) -> FounderProfile:
-    """Retorna o perfil (id=1), semeando do default se ainda nao existir."""
-    profile = await session.get(FounderProfile, 1)
+async def get_profile(session: AsyncSession, account_id: uuid.UUID) -> FounderProfile:
+    """Retorna o perfil da conta, semeando do default se ainda nao existir."""
+    profile = await session.get(FounderProfile, account_id)
     if profile is None:
-        profile = FounderProfile(id=1, **default_profile_dict())
+        profile = FounderProfile(account_id=account_id, **default_profile_dict())
         session.add(profile)
         await session.flush()
-        log.info("founder_profile.seeded")
+        log.info("founder_profile.seeded", account_id=str(account_id))
     return profile
 
 
-async def save_profile(session: AsyncSession, data: dict) -> FounderProfile:
-    """Cria/atualiza o perfil unico com os campos fornecidos."""
-    profile = await session.get(FounderProfile, 1)
+async def save_profile(
+    session: AsyncSession, account_id: uuid.UUID, data: dict
+) -> FounderProfile:
+    """Cria/atualiza o perfil da conta com os campos fornecidos."""
+    profile = await session.get(FounderProfile, account_id)
     if profile is None:
-        profile = FounderProfile(id=1)
+        profile = FounderProfile(account_id=account_id)
         session.add(profile)
     for field in _FIELDS:
         if field in data:

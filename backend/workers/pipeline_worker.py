@@ -2,13 +2,21 @@
 
 Como a pipeline e async e cada tarefa Celery roda de forma sincrona, criamos
 um engine/sessao novos dentro de cada execucao e usamos asyncio.run().
+
+Multi-tenancy: toda task carrega o account_id da conta dona da rodada —
+as Opportunities/relatorios criados sao carimbados com ele. O Beat dispara
+`scheduled_run` sem conta (modo dispatcher): ela varre as contas com a
+pipeline habilitada e enfileira uma rodada por conta.
 """
 
 import asyncio
 import traceback
+import uuid
 from collections.abc import Awaitable, Callable
+from datetime import date, datetime, time
 from typing import TypeVar
 
+from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from agents.daily_report import DailyReportAgent
@@ -17,6 +25,7 @@ from core import pipeline_control
 from core.config import settings
 from core.logging_config import get_logger
 from core.pipeline import pipeline
+from models import Opportunity
 
 log = get_logger("workers.pipeline")
 
@@ -41,8 +50,8 @@ async def _with_session(fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
 
 # ------------------------------- Pipeline --------------------------------
 @celery.task(name="workers.pipeline_worker.run_pipeline_once_task", bind=True)
-def run_pipeline_once_task(self) -> dict:
-    """Executa uma unica rodada da pipeline agora."""
+def run_pipeline_once_task(self, account_id: str) -> dict:
+    """Executa uma unica rodada da pipeline agora, para a conta informada."""
     # PRIMEIRO log, antes de qualquer await/asyncio.run: confirma que o worker
     # realmente PEGOU a task (e em qual fila chegou), nao so que foi enfileirada.
     delivery = getattr(self.request, "delivery_info", {}) or {}
@@ -50,11 +59,15 @@ def run_pipeline_once_task(self) -> dict:
         "worker.run_once.received",
         task_id=self.request.id,
         queue=delivery.get("routing_key"),
+        account_id=account_id,
     )
     try:
-        log.info("worker.run_once.started", task_id=self.request.id)
-        summary = asyncio.run(_with_session(pipeline.run_once))
-        pipeline_control.set_status({"last_task_id": self.request.id, **summary})
+        log.info("worker.run_once.started", task_id=self.request.id, account_id=account_id)
+        acc = uuid.UUID(account_id)
+        summary = asyncio.run(_with_session(lambda s: pipeline.run_once(s, acc)))
+        pipeline_control.set_status(
+            account_id, {"last_task_id": self.request.id, **summary}
+        )
         log.info("worker.run_once.completed", **{k: v for k, v in summary.items() if k != "opportunity_ids"})
         return summary
     except Exception as e:  # noqa: BLE001
@@ -70,15 +83,17 @@ def run_pipeline_once_task(self) -> dict:
 
 
 @celery.task(name="workers.pipeline_worker.run_for_idea_task", bind=True)
-def run_for_idea_task(self, idea: dict) -> dict:
+def run_for_idea_task(self, idea: dict, account_id: str) -> dict:
     """Modo Ideia: analisa um produto/ideia trazido pelo fundador.
 
     Roda a mesma cadeia de agentes, mas semeada com a ideia (sem Trend Hunter).
     """
-    log.info("worker.run_for_idea.received", task_id=self.request.id)
+    log.info("worker.run_for_idea.received", task_id=self.request.id, account_id=account_id)
     try:
+        acc = uuid.UUID(account_id)
+
         async def _run(session):
-            opp = await pipeline.run_for_idea(session, idea)
+            opp = await pipeline.run_for_idea(session, acc, idea)
             return {
                 "opportunity_id": str(opp.id),
                 "title": opp.title,
@@ -87,7 +102,9 @@ def run_for_idea_task(self, idea: dict) -> dict:
             }
 
         summary = asyncio.run(_with_session(_run))
-        pipeline_control.set_status({"trigger": "idea", "task_id": self.request.id, **summary})
+        pipeline_control.set_status(
+            account_id, {"trigger": "idea", "task_id": self.request.id, **summary}
+        )
         log.info("worker.run_for_idea.completed", **summary)
         return summary
     except Exception as e:  # noqa: BLE001
@@ -101,34 +118,53 @@ def run_for_idea_task(self, idea: dict) -> dict:
 
 
 @celery.task(name="workers.pipeline_worker.scheduled_run", bind=True)
-def scheduled_run(self) -> dict | None:
-    """Rodada do modo continuo.
+def scheduled_run(self, account_id: str | None = None) -> dict | None:
+    """Rodada do modo continuo (por conta).
 
-    Disparada pelo Start (1a rodada), pelo watchdog do Beat e pelo
-    auto-encadeamento (cada rodada enfileira a proxima). So roda se a pipeline
-    estiver habilitada e usa uma trava no Redis para nunca rodar duas rodadas
-    ao mesmo tempo. Ao terminar, se ainda habilitada, ja enfileira a proxima
-    rodada — e assim a pipeline roda continuamente ate o Stop.
+    Dois modos:
+    - SEM account_id (Beat/watchdog): varre as contas habilitadas e enfileira
+      uma rodada para cada uma (dispatcher — nao roda pipeline aqui).
+    - COM account_id (Start da API ou auto-encadeamento): roda a rodada da
+      conta, com trava por conta para nunca sobrepor duas rodadas dela.
+      Ao terminar, se a conta ainda estiver habilitada, ja enfileira a
+      proxima rodada — e assim a pipeline roda continuamente ate o Stop.
     """
     # PRIMEIRO log, antes de qualquer await: confirma que o worker pegou a task.
     delivery = getattr(self.request, "delivery_info", {}) or {}
-    log.info("worker.scheduled.received", task_id=self.request.id, queue=delivery.get("routing_key"))
+    log.info(
+        "worker.scheduled.received",
+        task_id=self.request.id,
+        queue=delivery.get("routing_key"),
+        account_id=account_id,
+    )
 
-    if not pipeline_control.is_enabled():
-        log.info("worker.scheduled.skipped", reason="pipeline_disabled")
+    # Modo dispatcher (Beat): uma task filha por conta habilitada.
+    if account_id is None:
+        accounts = pipeline_control.enabled_accounts()
+        for enabled_account in accounts:
+            scheduled_run.delay(account_id=enabled_account)
+        log.info("worker.scheduled.dispatched", accounts=len(accounts))
+        return {"dispatched_accounts": len(accounts)}
+
+    if not pipeline_control.is_enabled(account_id):
+        log.info("worker.scheduled.skipped", reason="pipeline_disabled", account_id=account_id)
         return None
 
-    # Evita rodadas sobrepostas (auto-encadeamento + watchdog do Beat).
-    if not pipeline_control.acquire_run_lock():
-        log.info("worker.scheduled.skipped", reason="already_running")
+    # Evita rodadas sobrepostas da MESMA conta (auto-encadeamento + watchdog).
+    if not pipeline_control.acquire_run_lock(account_id):
+        log.info("worker.scheduled.skipped", reason="already_running", account_id=account_id)
         return None
 
     try:
-        log.info("worker.scheduled.running", task_id=self.request.id)
-        summary = asyncio.run(_with_session(pipeline.run_once))
-        pipeline_control.set_status({"trigger": "scheduled", "task_id": self.request.id, **summary})
+        log.info("worker.scheduled.running", task_id=self.request.id, account_id=account_id)
+        acc = uuid.UUID(account_id)
+        summary = asyncio.run(_with_session(lambda s: pipeline.run_once(s, acc)))
+        pipeline_control.set_status(
+            account_id, {"trigger": "scheduled", "task_id": self.request.id, **summary}
+        )
         log.info(
             "worker.scheduled.completed",
+            account_id=account_id,
             **{k: v for k, v in summary.items() if k != "opportunity_ids"},
         )
         return summary
@@ -142,21 +178,22 @@ def scheduled_run(self) -> dict | None:
         )
         raise
     finally:
-        pipeline_control.release_run_lock()
-        # Modo continuo: se ainda habilitada, ja agenda a proxima rodada.
-        if pipeline_control.is_enabled():
+        pipeline_control.release_run_lock(account_id)
+        # Modo continuo: se a conta ainda esta habilitada, agenda a proxima rodada.
+        if pipeline_control.is_enabled(account_id):
             gap = settings.pipeline_continuous_gap_seconds
-            scheduled_run.apply_async(countdown=gap)
-            log.info("worker.scheduled.rechained", gap_seconds=gap)
+            scheduled_run.apply_async(kwargs={"account_id": account_id}, countdown=gap)
+            log.info("worker.scheduled.rechained", gap_seconds=gap, account_id=account_id)
         else:
-            log.info("worker.scheduled.stopped", reason="pipeline_disabled")
+            log.info("worker.scheduled.stopped", reason="pipeline_disabled", account_id=account_id)
 
 
 # ----------------------------- Daily Report ------------------------------
-async def _generate_daily_report(session: AsyncSession) -> dict:
-    report = await DailyReportAgent().generate(session)
+async def _generate_daily_report(session: AsyncSession, account_id: uuid.UUID) -> dict:
+    report = await DailyReportAgent().generate(session, account_id)
     return {
         "report_id": str(report.id),
+        "account_id": str(account_id),
         "date": report.report_date.isoformat(),
         "total_analyzed": report.total_analyzed,
         "promising_count": report.promising_count,
@@ -164,10 +201,37 @@ async def _generate_daily_report(session: AsyncSession) -> dict:
     }
 
 
+async def _accounts_with_activity_today(session: AsyncSession) -> list[uuid.UUID]:
+    """Contas que criaram oportunidades hoje (para o relatorio diario do Beat)."""
+    day = date.today()
+    stmt = select(distinct(Opportunity.account_id)).where(
+        Opportunity.created_at >= datetime.combine(day, time.min),
+        Opportunity.created_at <= datetime.combine(day, time.max),
+    )
+    result = await session.execute(stmt)
+    return [row for row in result.scalars().all()]
+
+
 @celery.task(name="workers.pipeline_worker.generate_daily_report_task")
-def generate_daily_report_task() -> dict:
-    """Gera o relatorio diario consolidado (1x/dia via beat, ou sob demanda)."""
-    log.info("worker.daily_report.started")
-    summary = asyncio.run(_with_session(_generate_daily_report))
-    log.info("worker.daily_report.completed", **summary)
-    return summary
+def generate_daily_report_task(account_id: str | None = None) -> dict | list[dict]:
+    """Gera o relatorio diario consolidado.
+
+    - COM account_id (sob demanda pela API): gera o relatorio DA conta.
+    - SEM account_id (Beat, 1x/dia): gera um relatorio para CADA conta que
+      teve oportunidades criadas hoje.
+    """
+    log.info("worker.daily_report.started", account_id=account_id)
+
+    if account_id is not None:
+        acc = uuid.UUID(account_id)
+        summary = asyncio.run(_with_session(lambda s: _generate_daily_report(s, acc)))
+        log.info("worker.daily_report.completed", **summary)
+        return summary
+
+    async def _run_for_all(session: AsyncSession) -> list[dict]:
+        accounts = await _accounts_with_activity_today(session)
+        return [await _generate_daily_report(session, acc) for acc in accounts]
+
+    summaries = asyncio.run(_with_session(_run_for_all))
+    log.info("worker.daily_report.completed_all", reports=len(summaries))
+    return summaries
