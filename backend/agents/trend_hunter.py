@@ -42,33 +42,57 @@ _SYSTEM = build_system(
 class TrendHunterAgent(BaseAgent):
     name = "trend_hunter"
 
-    async def discover_topics(self, limit: int = 5) -> dict:
-        """Descobre topicos em alta. Retorna {"topics": [...]}."""
+    async def discover_topics(self, limit: int = 5, niche: str = "") -> dict:
+        """Descobre topicos em alta. Retorna {"topics": [...]}.
+
+        Com `niche` (tema escolhido pelo cliente, ex: "manicure em Dublin"),
+        todas as queries e o prompt ficam escopados naquele nicho — a busca
+        acha oportunidades DENTRO do tema, nao tendencias gerais.
+        """
         month = date.today().strftime("%B %Y")
-        log.info("trend_hunter.started", month=month, limit=limit)
+        niche = niche.strip()
+        log.info("trend_hunter.started", month=month, limit=limit, niche=niche or None)
 
         # 1. Fontes (cada uma degrada graciosamente para vazio).
-        serper_results = await serper.google_search(
-            f"trending startup ideas and growing markets {month}", num_results=8
-        )
-        grok_text = await grok.search_x(
-            f"What new tools, problems or product categories are people excited about on X in {month}? "
-            "Focus on things that could become a software business."
-        )
+        if niche:
+            serper_query = f"trends, problems and business opportunities in {niche} {month}"
+            grok_query = (
+                f"What are people discussing on X about {niche} in {month}? "
+                "Focus on complaints, unmet needs and new tools that could become a software business."
+            )
+            ph_query = (
+                f"What products, tools or emerging needs related to {niche} are trending "
+                f"on Product Hunt in {month}? List concrete product categories."
+            )
+        else:
+            serper_query = f"trending startup ideas and growing markets {month}"
+            grok_query = (
+                f"What new tools, problems or product categories are people excited about on X in {month}? "
+                "Focus on things that could become a software business."
+            )
+            ph_query = (
+                f"What are the trending products on Product Hunt in {month}? "
+                "List concrete product categories and emerging needs."
+            )
+
+        serper_results = await serper.google_search(serper_query, num_results=8)
+        grok_text = await grok.search_x(grok_query)
         # HN agora vem direto da API oficial; o Perplexity foca so em Product Hunt.
-        ph_text = await perplexity.search(
-            f"What are the trending products on Product Hunt in {month}? "
-            "List concrete product categories and emerging needs.",
-            focus="Product Hunt",
-        )
+        ph_text = await perplexity.search(ph_query, focus="Product Hunt")
         hn_stories = await hackernews.get_top_stories(limit=10)
 
         sources_block = self._format_sources(serper_results, grok_text, ph_text, hn_stories)
 
-        # 2. Consolidacao via LLM.
+        # 2. Consolidacao via LLM (escopada no nicho quando informado).
+        niche_instruction = (
+            f'\nIMPORTANT: every topic MUST be a specific opportunity WITHIN the niche "{niche}". '
+            "Do not return generic tech trends outside this niche.\n"
+            if niche
+            else ""
+        )
         prompt = f"""Based on the research below, identify {limit} to {min(limit + 5, 10)} business topics/categories
 that are growing RIGHT NOW and could become a software or SaaS business.
-
+{niche_instruction}
 RESEARCH DATA:
 {sources_block}
 

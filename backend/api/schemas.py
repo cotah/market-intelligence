@@ -5,6 +5,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from models.hunt import HuntFrequency
 from models.opportunity import OpportunityStatus
 
 
@@ -86,6 +87,32 @@ class PipelineActionOut(BaseModel):
     ok: bool
     message: str
     task_id: str | None = None
+
+
+class HuntSettingsIn(BaseModel):
+    """Configuracao do cacador enviada pelo cliente (PUT /hunt/settings)."""
+
+    enabled: bool
+    frequency: HuntFrequency
+    topic: str = Field(default="", max_length=500)
+
+
+class HuntSettingsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    enabled: bool
+    frequency: str
+    topic: str
+    last_run_at: datetime | None
+    next_run_at: datetime | None
+
+
+class HuntRunOut(BaseModel):
+    """Resposta do POST /hunt/run."""
+
+    status: str
+    run_id: str | None = None
+    message: str = ""
 
 
 class FounderProfileSchema(BaseModel):

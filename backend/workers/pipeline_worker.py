@@ -13,7 +13,7 @@ import asyncio
 import traceback
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from typing import TypeVar
 
 from sqlalchemy import distinct, select
@@ -21,11 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from agents.daily_report import DailyReportAgent
 from celery_app import celery
-from core import pipeline_control
+from core import hunt_service, pipeline_control
 from core.config import settings
 from core.logging_config import get_logger
 from core.pipeline import pipeline
-from models import Opportunity
+from models import HuntRun, HuntSettings, Opportunity
 
 log = get_logger("workers.pipeline")
 
@@ -186,6 +186,111 @@ def scheduled_run(self, account_id: str | None = None) -> dict | None:
             log.info("worker.scheduled.rechained", gap_seconds=gap, account_id=account_id)
         else:
             log.info("worker.scheduled.stopped", reason="pipeline_disabled", account_id=account_id)
+
+
+# --------------------------------- Hunt ----------------------------------
+@celery.task(name="workers.pipeline_worker.run_hunt_task", bind=True)
+def run_hunt_task(self, account_id: str, trigger: str = "manual") -> dict | None:
+    """Rodada do cacador DESTA conta, com o tema configurado em hunt_settings.
+
+    - trigger="manual": disparada pelo POST /hunt/run.
+    - trigger="scheduled": disparada pelo dispatcher do Beat (frequency).
+
+    O uso e registrado em hunt_runs (base do debito de Caps na Fase 2) e o
+    last_run_at/next_run_at da conta sao atualizados ao final — mesmo em falha,
+    para a frequencia nao re-disparar em loop uma rodada quebrada.
+    """
+    log.info(
+        "worker.hunt.received", task_id=self.request.id, account_id=account_id, trigger=trigger
+    )
+    acc = uuid.UUID(account_id)
+
+    # Mesma trava por conta do modo continuo: nunca duas rodadas simultaneas.
+    if not pipeline_control.acquire_run_lock(account_id):
+        log.info("worker.hunt.skipped", reason="already_running", account_id=account_id)
+        return None
+
+    run_pk: uuid.UUID | None = None
+    try:
+        # 1. Carrega settings e registra o INICIO do uso (sessao propria: o
+        # registro sobrevive mesmo se a pipeline falhar depois).
+        async def _start(session: AsyncSession) -> tuple[uuid.UUID, str]:
+            settings_row = await hunt_service.get_settings(session, acc)
+            run = await hunt_service.start_run(
+                session,
+                acc,
+                run_id=self.request.id or "",
+                topic=settings_row.topic,
+                trigger=trigger,
+            )
+            return run.id, settings_row.topic
+
+        run_pk, topic = asyncio.run(_with_session(_start))
+
+        # 2. Roda a pipeline escopada no tema da conta.
+        summary = asyncio.run(
+            _with_session(lambda s: pipeline.run_once(s, acc, niche=topic, source="hunt"))
+        )
+
+        # 3. Fecha o registro de uso e reagenda (last_run_at/next_run_at).
+        asyncio.run(_with_session(lambda s: _finish_hunt_run(s, run_pk, success=True)))
+        pipeline_control.set_status(
+            account_id,
+            {"trigger": f"hunt_{trigger}", "task_id": self.request.id, "topic": topic, **summary},
+        )
+        log.info(
+            "worker.hunt.completed",
+            account_id=account_id,
+            topic=topic,
+            **{k: v for k, v in summary.items() if k != "opportunity_ids"},
+        )
+        return summary
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "worker.hunt.failed",
+            account_id=account_id,
+            error=str(e),
+            error_type=type(e).__name__,
+            traceback=traceback.format_exc(),
+        )
+        if run_pk is not None:
+            try:
+                asyncio.run(_with_session(lambda s: _finish_hunt_run(s, run_pk, success=False)))
+            except Exception:  # noqa: BLE001
+                log.error("worker.hunt.finish_record_failed", account_id=account_id)
+        raise
+    finally:
+        pipeline_control.release_run_lock(account_id)
+
+
+async def _finish_hunt_run(session: AsyncSession, run_pk: uuid.UUID, *, success: bool) -> None:
+    run = await session.get(HuntRun, run_pk)
+    if run is not None:
+        await hunt_service.finish_run(session, run, success=success)
+
+
+@celery.task(name="workers.pipeline_worker.hunt_scheduler_dispatch")
+def hunt_scheduler_dispatch() -> dict:
+    """Dispatcher do Beat: varre as contas com o cacador ligado e na hora.
+
+    Barato (um SELECT indexado, sem LLM). frequency='manual' nunca entra
+    aqui: manual nao tem next_run_at.
+    """
+
+    async def _due_accounts(session: AsyncSession) -> list[str]:
+        stmt = select(HuntSettings.account_id).where(
+            HuntSettings.enabled.is_(True),
+            HuntSettings.next_run_at.is_not(None),
+            HuntSettings.next_run_at <= datetime.now(UTC),
+        )
+        result = await session.execute(stmt)
+        return [str(acc) for acc in result.scalars().all()]
+
+    accounts = asyncio.run(_with_session(_due_accounts))
+    for account_id in accounts:
+        run_hunt_task.delay(account_id=account_id, trigger="scheduled")
+    log.info("worker.hunt_dispatch.completed", accounts=len(accounts))
+    return {"dispatched_accounts": len(accounts)}
 
 
 # ----------------------------- Daily Report ------------------------------

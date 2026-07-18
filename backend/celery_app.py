@@ -51,6 +51,12 @@ celery.conf.update(
             "task": "workers.pipeline_worker.scheduled_run",
             "schedule": float(settings.pipeline_interval_seconds),
         },
+        # Cacador por conta: varre hunt_settings (enabled + next_run_at <= agora)
+        # e enfileira uma rodada por conta devida. Barato: um SELECT, sem LLM.
+        "hunt-scheduler": {
+            "task": "workers.pipeline_worker.hunt_scheduler_dispatch",
+            "schedule": 300.0,
+        },
         # Relatorio diario consolidado, todo dia as 23:00 UTC.
         "daily-report": {
             "task": "workers.pipeline_worker.generate_daily_report_task",

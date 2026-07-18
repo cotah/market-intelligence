@@ -1,4 +1,4 @@
-"""Testes do orquestrador da pipeline (sem rede/banco: agentes e sessao fakes).
+﻿"""Testes do orquestrador da pipeline (sem rede/banco: agentes e sessao fakes).
 
 Cobre o fluxo central: mapeamento de dados para os campos JSONB, parada da
 cadeia no descarte, score_total, rodada sem topicos e a sinalizacao de
@@ -118,7 +118,7 @@ async def test_project_generator_skip_marker_is_persisted_in_project_plan():
         "skipped": True,
         "score": 7.0,
         "min_required": 8.0,
-        "reason": "Score 7.0 abaixo do minimo 8.0 — plano nao gerado (comportamento esperado).",
+        "reason": "Score 7.0 abaixo do minimo 8.0 â€” plano nao gerado (comportamento esperado).",
     }
     generator = FakeAgent("project_generator", _ok(skip_marker))
     p = _pipeline_with([scorer, generator])
@@ -143,7 +143,7 @@ async def test_scorer_sets_score_total():
 # ------------- Opcao A: selo "Aprovado com ressalvas" (pos-DA) -------------
 # docs/PROPOSTA_SCORER_DEVILS_ADVOCATE.md: se o Devil's Advocate lista
 # 2+ fatal flaws OU 3+ riscos "high", score_data ganha risk_flag="high".
-# A NOTA NUNCA MUDA — so o selo.
+# A NOTA NUNCA MUDA â€” so o selo.
 
 
 async def test_devils_advocate_fatal_flaws_set_risk_flag_without_changing_score():
@@ -202,7 +202,7 @@ async def test_devils_advocate_calm_does_not_set_risk_flag():
 async def test_run_once_with_no_topics_returns_empty_summary(monkeypatch):
     p = _pipeline_with([FakeAgent("problem_hunter", _ok())])
 
-    async def no_topics(limit):
+    async def no_topics(limit, niche=""):
         return {"topics": []}
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", no_topics)
@@ -228,7 +228,7 @@ async def test_run_once_counts_completed_and_discarded(monkeypatch):
 
     p = _pipeline_with([TopicSensitiveAgent()])
 
-    async def two_topics(limit):
+    async def two_topics(limit, niche=""):
         return {"topics": [{"name": "Good"}, {"name": "Bad"}]}
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", two_topics)
@@ -246,7 +246,7 @@ async def test_run_once_counts_completed_and_discarded(monkeypatch):
 
 # --------------------- Falha parcial (PARTIAL + failed_agents) ---------------------
 # Comportamento novo: um topico que termina a cadeia com algum agente falho
-# NUNCA aparece como COMPLETED "limpo" — vira PARTIAL e registra quem falhou.
+# NUNCA aparece como COMPLETED "limpo" â€” vira PARTIAL e registra quem falhou.
 
 
 async def test_topic_with_failed_agent_becomes_partial():
@@ -271,7 +271,7 @@ async def test_topic_with_all_agents_ok_stays_completed_without_failed_agents():
     opp = await p._process_topic(FakeSession(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
-    assert not opp.failed_agents  # None ou lista vazia — nunca falhas fantasma
+    assert not opp.failed_agents  # None ou lista vazia â€” nunca falhas fantasma
 
 
 async def test_failed_agents_recorded_even_when_discarded_later():
@@ -301,7 +301,7 @@ async def test_run_once_counts_partial_separately(monkeypatch):
 
     p = _pipeline_with([FailingAgent()])
 
-    async def one_topic(limit):
+    async def one_topic(limit, niche=""):
         return {"topics": [{"name": "Good"}]}
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", one_topic)

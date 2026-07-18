@@ -88,18 +88,27 @@ class Pipeline:
         session: AsyncSession,
         account_id: uuid.UUID,
         topics_limit: int | None = None,
+        *,
+        niche: str = "",
+        source: str = "trend_hunter",
     ) -> dict:
         """Roda uma rodada completa PARA UMA CONTA: descobre topicos e processa cada um.
 
-        Retorna um resumo {topics, completed, discarded, opportunity_ids}.
+        Com `niche` (tema do cacador da conta), a descoberta fica escopada
+        naquele tema. Retorna um resumo {topics, completed, discarded, opportunity_ids}.
         """
         limit = topics_limit or settings.pipeline_topics_per_run
-        log.info("pipeline.run_once.started", topics_limit=limit, account_id=str(account_id))
+        log.info(
+            "pipeline.run_once.started",
+            topics_limit=limit,
+            account_id=str(account_id),
+            niche=niche or None,
+        )
 
         # Carrega o perfil do fundador DA CONTA uma vez por rodada.
         profile = profile_to_dict(await get_profile(session, account_id))
 
-        discovery = await self.trend_hunter.discover_topics(limit=limit)
+        discovery = await self.trend_hunter.discover_topics(limit=limit, niche=niche)
         topics = discovery.get("topics", [])
 
         # Log explicito de quantos (e quais) topicos o Trend Hunter achou.
@@ -128,7 +137,9 @@ class Pipeline:
                 position=f"{index}/{len(topics)}",
                 topic=topic_data.get("name", "?"),
             )
-            opp = await self._process_topic(session, account_id, topic_data, profile)
+            opp = await self._process_topic(
+                session, account_id, topic_data, profile, source=source
+            )
             summary["opportunity_ids"].append(str(opp.id))
             if opp.status == OpportunityStatus.DISCARDED:
                 summary["discarded"] += 1

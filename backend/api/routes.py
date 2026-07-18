@@ -19,12 +19,15 @@ from api.auth import require_control_key, require_read_key
 from api.schemas import (
     DailyReportOut,
     FounderProfileSchema,
+    HuntRunOut,
+    HuntSettingsIn,
+    HuntSettingsOut,
     OpportunityListItem,
     OpportunityOut,
     PipelineActionOut,
     PipelineStatusOut,
 )
-from core import pipeline_control
+from core import hunt_service, pipeline_control
 from core.database import get_session
 from core.founder_profile_service import get_profile, profile_to_dict, save_profile
 from core.logging_config import get_logger
@@ -200,6 +203,66 @@ async def generate_daily_report(
     except Exception as e:  # noqa: BLE001
         log.error("api.daily_report_failed", error=str(e))
         return PipelineActionOut(ok=False, message=f"Falha ao enfileirar: {e}")
+
+
+# -------------------------------- Hunt ----------------------------------
+@router.get(
+    "/hunt/settings",
+    response_model=HuntSettingsOut,
+    dependencies=[Depends(require_read_key)],
+)
+async def read_hunt_settings(
+    account_id: uuid.UUID = Depends(require_account_id),
+    session: AsyncSession = Depends(get_session),
+) -> HuntSettingsOut:
+    """Settings do cacador DESTA conta; cria o default desligado se nao existir."""
+    settings_row = await hunt_service.get_settings(session, account_id)
+    return HuntSettingsOut.model_validate(settings_row)
+
+
+@router.put(
+    "/hunt/settings",
+    response_model=HuntSettingsOut,
+    dependencies=[Depends(require_control_key)],
+)
+async def update_hunt_settings(
+    payload: HuntSettingsIn,
+    account_id: uuid.UUID = Depends(require_account_id),
+    session: AsyncSession = Depends(get_session),
+) -> HuntSettingsOut:
+    """Liga/desliga o cacador, define frequencia (manual|daily|weekly|monthly)
+    e o tema das buscas. frequency='manual' nunca roda sozinho."""
+    settings_row = await hunt_service.save_settings(
+        session,
+        account_id,
+        enabled=payload.enabled,
+        frequency=payload.frequency.value,
+        topic=payload.topic,
+    )
+    return HuntSettingsOut.model_validate(settings_row)
+
+
+@router.post(
+    "/hunt/run",
+    response_model=HuntRunOut,
+    dependencies=[Depends(require_control_key)],
+)
+async def run_hunt_now(
+    account_id: uuid.UUID = Depends(require_account_id),
+) -> HuntRunOut:
+    """Roda a busca AGORA com o topic da conta (enfileira no Celery).
+
+    O run_id retornado e o task id do Celery; o registro de uso (HuntRun)
+    e gravado pelo worker ao iniciar a rodada.
+    """
+    try:
+        from workers.pipeline_worker import run_hunt_task
+
+        task = run_hunt_task.delay(account_id=str(account_id), trigger="manual")
+        return HuntRunOut(status="queued", run_id=str(task.id), message="Busca enfileirada.")
+    except Exception as e:  # noqa: BLE001
+        log.error("api.hunt_run_failed", error=str(e))
+        return HuntRunOut(status="error", message=f"Falha ao enfileirar: {e}")
 
 
 # ------------------------------ Pipeline --------------------------------
