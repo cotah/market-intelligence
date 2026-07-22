@@ -1,17 +1,18 @@
 """Orquestrador da pipeline de agentes.
 
-FASE 1: liga Trend Hunter (descoberta de topicos) -> Problem Hunter.
 Cada topico vira uma Opportunity no banco. Se um agente sinaliza descarte,
 gravamos o motivo e marcamos status=DISCARDED antes de parar.
 
-Os agentes 3-11 serao adicionados a `self.agents` na Fase 2, sem mudar
-a estrutura de orquestracao.
+Sessoes curtas: a pipeline recebe uma FABRICA de sessoes (nao uma sessao) e
+abre sessoes curtas apenas para ler o perfil e para gravar cada Opportunity
+pronta — NUNCA durante as chamadas de LLM, que levam minutos. A Opportunity
+nasce e evolui em memoria; 1 commit por topico, ja com o status final.
 """
 
 import uuid
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agents.ai_opportunity import AIOpportunityAgent
 from agents.base import BaseAgent, PipelineContext
@@ -85,7 +86,7 @@ class Pipeline:
 
     async def run_once(
         self,
-        session: AsyncSession,
+        session_factory: async_sessionmaker[AsyncSession],
         account_id: uuid.UUID,
         topics_limit: int | None = None,
         *,
@@ -105,8 +106,12 @@ class Pipeline:
             niche=niche or None,
         )
 
-        # Carrega o perfil do fundador DA CONTA uma vez por rodada.
-        profile = profile_to_dict(await get_profile(session, account_id))
+        # Fase de leitura (sessao curta): carrega o perfil do fundador DA CONTA
+        # uma vez por rodada. get_profile SEMEIA o perfil na primeira leitura,
+        # entao o commit e necessario aqui.
+        async with session_factory() as session:
+            profile = profile_to_dict(await get_profile(session, account_id))
+            await session.commit()
 
         discovery = await self.trend_hunter.discover_topics(limit=limit, niche=niche)
         topics = discovery.get("topics", [])
@@ -138,7 +143,7 @@ class Pipeline:
                 topic=topic_data.get("name", "?"),
             )
             opp = await self._process_topic(
-                session, account_id, topic_data, profile, source=source
+                session_factory, account_id, topic_data, profile, source=source
             )
             summary["opportunity_ids"].append(str(opp.id))
             if opp.status == OpportunityStatus.DISCARDED:
@@ -166,7 +171,7 @@ class Pipeline:
 
     async def _process_topic(
         self,
-        session: AsyncSession,
+        session_factory: async_sessionmaker[AsyncSession],
         account_id: uuid.UUID,
         topic_data: dict,
         profile: dict | None = None,
@@ -176,7 +181,11 @@ class Pipeline:
     ) -> Opportunity:
         topic_name = topic_data.get("name", "Unknown topic")
 
+        # Fase LLM: a Opportunity vive SO EM MEMORIA enquanto os agentes rodam
+        # (minutos de LLM) — nenhuma sessao/conexao aberta. O id e gerado no
+        # cliente para os logs; o banco so ve a linha no commit final.
         opp = Opportunity(
+            id=uuid.uuid4(),
             account_id=account_id,
             title=topic_name,
             topic_origin=topic_name,
@@ -184,8 +193,6 @@ class Pipeline:
             status=OpportunityStatus.IN_PROGRESS,
             trend_data=topic_data,
         )
-        session.add(opp)
-        await session.flush()  # garante opp.id
 
         log.info("pipeline.topic.started", topic=topic_name, opportunity_id=str(opp.id))
 
@@ -200,6 +207,7 @@ class Pipeline:
         # degradation), mas a falha fica registrada e o status final vira
         # PARTIAL — nunca um COMPLETED com dado faltando em silencio.
         failed_agents: list[dict] = []
+        discarded = False
 
         for agent in self.agents:
             log.info("pipeline.agent.running", topic=topic_name, agent=agent.name)
@@ -275,32 +283,40 @@ class Pipeline:
                         by=agent.name,
                         reason=result.discard_reason,
                     )
-                    await session.flush()
-                    return opp
+                    discarded = True
+                    break
 
             # Rastreia cada agente que o topico passou, para saber exatamente
             # ate onde ele chegou antes de (eventualmente) ser descartado.
             log.info("pipeline.agent.passed", topic=topic_name, agent=agent.name)
 
-        if failed_agents:
-            opp.status = OpportunityStatus.PARTIAL
-            opp.failed_agents = failed_agents
-        else:
-            opp.status = OpportunityStatus.COMPLETED
-        await session.flush()
-        log.info(
-            "pipeline.topic.completed",
-            topic=topic_name,
-            opportunity_id=str(opp.id),
-            score_total=opp.score_total,
-            status=opp.status.value,
-            failed_agents=[f["agent"] for f in failed_agents] or None,
-        )
+        if not discarded:
+            if failed_agents:
+                opp.status = OpportunityStatus.PARTIAL
+                opp.failed_agents = failed_agents
+            else:
+                opp.status = OpportunityStatus.COMPLETED
+
+        # Fase de escrita (sessao curta): 1 commit por topico, ja com o status
+        # final — o banco nunca ve IN_PROGRESS nem linha parcial.
+        async with session_factory() as session:
+            session.add(opp)
+            await session.commit()
+
+        if not discarded:
+            log.info(
+                "pipeline.topic.completed",
+                topic=topic_name,
+                opportunity_id=str(opp.id),
+                score_total=opp.score_total,
+                status=opp.status.value,
+                failed_agents=[f["agent"] for f in failed_agents] or None,
+            )
         return opp
 
     async def run_for_idea(
         self,
-        session: AsyncSession,
+        session_factory: async_sessionmaker[AsyncSession],
         account_id: uuid.UUID,
         idea: dict,
         profile: dict | None = None,
@@ -312,7 +328,10 @@ class Pipeline:
         name = (str(idea.get("name") or "").strip()[:200]) or "Ideia sem nome"
         description = str(idea.get("description") or "").strip()[:2000]
         if profile is None:
-            profile = profile_to_dict(await get_profile(session, account_id))
+            # Fase de leitura (sessao curta); commit porque get_profile semeia.
+            async with session_factory() as session:
+                profile = profile_to_dict(await get_profile(session, account_id))
+                await session.commit()
         topic_data = {
             "name": name,
             "description": description,
@@ -321,7 +340,7 @@ class Pipeline:
         }
         log.info("pipeline.run_for_idea.started", idea=name)
         opp = await self._process_topic(
-            session,
+            session_factory,
             account_id,
             topic_data,
             profile,

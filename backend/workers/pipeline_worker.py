@@ -1,7 +1,14 @@
 """Tarefas Celery que executam a pipeline e o relatorio diario.
 
 Como a pipeline e async e cada tarefa Celery roda de forma sincrona, criamos
-um engine/sessao novos dentro de cada execucao e usamos asyncio.run().
+um engine novo dentro de cada execucao e usamos asyncio.run().
+
+Sessoes curtas: as tasks da pipeline passam uma FABRICA de sessoes
+(`_with_session_factory`) — a pipeline abre sessoes curtas so para ler/gravar
+e NUNCA segura conexao durante as LLMs. O engine usa NullPool: fechar a
+sessao FECHA a conexao de verdade (pool normal a devolveria ao pool, mas ela
+continuaria aberta no servidor). Operacoes one-shot (hunt start/finish,
+dispatcher, relatorio diario) continuam com `_with_session`.
 
 Multi-tenancy: toda task carrega o account_id da conta dona da rodada —
 as Opportunities/relatorios criados sao carimbados com ele. O Beat dispara
@@ -19,7 +26,13 @@ from datetime import UTC, date, datetime, time
 from typing import TypeVar
 
 from sqlalchemy import distinct, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import NullPool
 
 from agents.daily_report import DailyReportAgent
 from celery_app import celery
@@ -34,16 +47,44 @@ log = get_logger("workers.pipeline")
 T = TypeVar("T")
 
 
-async def _with_session(fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
-    """Roda `fn(session)` com engine/sessao proprios e commit ao final."""
-    # connect timeout curto (default do asyncpg e 60s): cada task abre uma
-    # conexao NOVA, entao um soluco do Postgres/rede interna nao pode pendurar
-    # o worker por um minuto — falha rapido e quem chamou decide o que fazer.
-    engine = create_async_engine(
+def _make_engine() -> AsyncEngine:
+    """Engine descartavel por task: NullPool + connect timeout curto.
+
+    - NullPool: fechar a sessao FECHA a conexao no servidor (pool normal a
+      manteria aberta ate o dispose — exatamente o que queremos evitar).
+    - connect timeout curto (default do asyncpg e 60s): cada sessao abre uma
+      conexao NOVA, entao um soluco do Postgres/rede interna nao pode pendurar
+      o worker por um minuto — falha rapido e quem chamou decide o que fazer.
+    """
+    return create_async_engine(
         settings.database_url,
-        pool_pre_ping=True,
-        connect_args={"timeout": 10},
+        poolclass=NullPool,
+        connect_args={"timeout": 5},
     )
+
+
+async def _with_session_factory(
+    fn: Callable[[async_sessionmaker[AsyncSession]], Awaitable[T]],
+) -> T:
+    """Roda `fn(session_factory)` — quem recebe abre/fecha sessoes curtas.
+
+    Usado pelas rodadas da pipeline: a fabrica permite que a pipeline nunca
+    segure conexao durante as LLMs (cada commit e responsabilidade dela).
+    """
+    engine = _make_engine()
+    try:
+        return await fn(async_sessionmaker(engine, expire_on_commit=False))
+    finally:
+        await engine.dispose()
+
+
+async def _with_session(fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
+    """Roda `fn(session)` com engine/sessao proprios e commit ao final.
+
+    Para operacoes one-shot e rapidas (hunt start/finish, dispatcher,
+    relatorio diario) — a sessao dura o tempo da operacao inteira.
+    """
+    engine = _make_engine()
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with session_factory() as session:
@@ -73,7 +114,7 @@ def run_pipeline_once_task(self, account_id: str) -> dict:
     try:
         log.info("worker.run_once.started", task_id=self.request.id, account_id=account_id)
         acc = uuid.UUID(account_id)
-        summary = asyncio.run(_with_session(lambda s: pipeline.run_once(s, acc)))
+        summary = asyncio.run(_with_session_factory(lambda sf: pipeline.run_once(sf, acc)))
         pipeline_control.set_status(
             account_id, {"last_task_id": self.request.id, **summary}
         )
@@ -101,8 +142,8 @@ def run_for_idea_task(self, idea: dict, account_id: str) -> dict:
     try:
         acc = uuid.UUID(account_id)
 
-        async def _run(session):
-            opp = await pipeline.run_for_idea(session, acc, idea)
+        async def _run(session_factory):
+            opp = await pipeline.run_for_idea(session_factory, acc, idea)
             return {
                 "opportunity_id": str(opp.id),
                 "title": opp.title,
@@ -110,7 +151,7 @@ def run_for_idea_task(self, idea: dict, account_id: str) -> dict:
                 "score_total": opp.score_total,
             }
 
-        summary = asyncio.run(_with_session(_run))
+        summary = asyncio.run(_with_session_factory(_run))
         pipeline_control.set_status(
             account_id, {"trigger": "idea", "task_id": self.request.id, **summary}
         )
@@ -167,7 +208,7 @@ def scheduled_run(self, account_id: str | None = None) -> dict | None:
     try:
         log.info("worker.scheduled.running", task_id=self.request.id, account_id=account_id)
         acc = uuid.UUID(account_id)
-        summary = asyncio.run(_with_session(lambda s: pipeline.run_once(s, acc)))
+        summary = asyncio.run(_with_session_factory(lambda sf: pipeline.run_once(sf, acc)))
         pipeline_control.set_status(
             account_id, {"trigger": "scheduled", "task_id": self.request.id, **summary}
         )
@@ -238,7 +279,7 @@ def run_hunt_task(self, account_id: str, trigger: str = "manual") -> dict | None
 
         # 2. Roda a pipeline escopada no tema da conta.
         summary = asyncio.run(
-            _with_session(lambda s: pipeline.run_once(s, acc, niche=topic, source="hunt"))
+            _with_session_factory(lambda sf: pipeline.run_once(sf, acc, niche=topic, source="hunt"))
         )
 
         # 3. Fecha o registro de uso e reagenda (last_run_at/next_run_at).

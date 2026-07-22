@@ -3,9 +3,16 @@
 Cobre o fluxo central: mapeamento de dados para os campos JSONB, parada da
 cadeia no descarte, score_total, rodada sem topicos e a sinalizacao de
 falha parcial (status PARTIAL + failed_agents).
+
+Sessoes curtas: a pipeline recebe uma FABRICA de sessoes e abre sessoes
+curtas so para ler/gravar — nunca durante as LLMs. A FakeSessionFactory
+rastreia quantas sessoes estao abertas em cada instante e o que foi
+commitado, para os testes provarem esse contrato.
 """
 
 import uuid
+
+import pytest
 
 from agents.base import AgentResult, BaseAgent, PipelineContext
 from core.pipeline import Pipeline
@@ -15,28 +22,62 @@ from models import FounderProfile, Opportunity, OpportunityStatus
 ACC = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
-class FakeSession:
-    """Sessao async minima: simula get/add/flush sem banco real."""
+class FakeSessionFactory:
+    """Fabrica de sessoes fake: cada `async with factory()` e uma sessao curta.
 
-    def __init__(self) -> None:
-        self._profiles: dict[uuid.UUID, FounderProfile] = {}
+    Rastreia `open_now` (sessoes abertas NESTE instante), commits e os
+    objetos que chegaram a um commit — base das provas de sessao curta.
+    """
+
+    def __init__(self, fail_commit_for: set[str] | None = None) -> None:
+        self.profiles: dict[uuid.UUID, FounderProfile] = {}
+        self.open_now = 0
+        self.commits = 0
+        self.committed: list = []
+        # Titulos de Opportunity cujo commit deve falhar (simula pane no banco).
+        self.fail_commit_for = fail_commit_for or set()
+
+    def __call__(self) -> "FakeSession":
+        return FakeSession(self)
+
+
+class FakeSession:
+    """Sessao async minima: get/add/flush/commit + async context manager."""
+
+    def __init__(self, factory: FakeSessionFactory) -> None:
+        self._factory = factory
         self.added: list = []
+
+    async def __aenter__(self) -> "FakeSession":
+        self._factory.open_now += 1
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        self._factory.open_now -= 1
+        return False
 
     async def get(self, model, pk):
         if model is FounderProfile:
-            return self._profiles.get(pk)
+            return self._factory.profiles.get(pk)
         return None
 
     def add(self, obj) -> None:
         self.added.append(obj)
         if isinstance(obj, FounderProfile):
-            self._profiles[obj.account_id] = obj
+            self._factory.profiles[obj.account_id] = obj
 
     async def flush(self) -> None:
         # Simula o default=uuid.uuid4 aplicado pelo banco no INSERT.
         for obj in self.added:
             if isinstance(obj, Opportunity) and obj.id is None:
                 obj.id = uuid.uuid4()
+
+    async def commit(self) -> None:
+        for obj in self.added:
+            if isinstance(obj, Opportunity) and obj.title in self._factory.fail_commit_for:
+                raise RuntimeError(f"commit falhou para {obj.title!r}")
+        self._factory.commits += 1
+        self._factory.committed.extend(self.added)
 
 
 class FakeAgent(BaseAgent):
@@ -73,7 +114,7 @@ async def test_process_topic_completes_and_maps_data_to_jsonb_fields():
     competitor = FakeAgent("competitor_hunter", _ok({"competitors": [{"name": "A"}]}))
     p = _pipeline_with([problem, competitor])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
     assert opp.trend_data == TOPIC
@@ -97,7 +138,7 @@ async def test_process_topic_discard_stops_chain():
     after = FakeAgent("monetization", _ok({"models": ["saas"]}))
     p = _pipeline_with([first, discarder, after])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.DISCARDED
     assert opp.discarded_by == "founder_compatibility"
@@ -123,7 +164,7 @@ async def test_project_generator_skip_marker_is_persisted_in_project_plan():
     generator = FakeAgent("project_generator", _ok(skip_marker))
     p = _pipeline_with([scorer, generator])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
     assert not opp.failed_agents
@@ -134,7 +175,7 @@ async def test_scorer_sets_score_total():
     scorer = FakeAgent("scorer", _ok({"total": 8.7, "market": 9}))
     p = _pipeline_with([scorer])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     assert opp.score_total == 8.7
     assert opp.score_data == {"total": 8.7, "market": 9}
@@ -154,7 +195,7 @@ async def test_devils_advocate_fatal_flaws_set_risk_flag_without_changing_score(
     )
     p = _pipeline_with([scorer, da])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
     assert opp.score_data["risk_flag"] == "high"
@@ -178,7 +219,7 @@ async def test_devils_advocate_many_high_risks_set_risk_flag():
     )
     p = _pipeline_with([scorer, da])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     assert opp.score_data["risk_flag"] == "high"
 
@@ -191,7 +232,7 @@ async def test_devils_advocate_calm_does_not_set_risk_flag():
     )
     p = _pipeline_with([scorer, da])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     # 1 fatal flaw e 1 risco high: abaixo dos thresholds (2 e 3).
     assert "risk_flag" not in opp.score_data
@@ -207,7 +248,7 @@ async def test_run_once_with_no_topics_returns_empty_summary(monkeypatch):
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", no_topics)
 
-    summary = await p.run_once(FakeSession(), ACC)
+    summary = await p.run_once(FakeSessionFactory(), ACC)
 
     assert summary["topics"] == 0
     assert summary["completed"] == 0
@@ -233,7 +274,7 @@ async def test_run_once_counts_completed_and_discarded(monkeypatch):
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", two_topics)
 
-    summary = await p.run_once(FakeSession(), ACC)
+    summary = await p.run_once(FakeSessionFactory(), ACC)
 
     assert summary["topics"] == 2
     assert summary["completed"] == 1
@@ -257,7 +298,7 @@ async def test_topic_with_failed_agent_becomes_partial():
     ok_after = FakeAgent("monetization", _ok({"models": ["saas"]}))
     p = _pipeline_with([ok_before, failing, ok_after])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     # A cadeia continua (graceful degradation), mas o resultado e sinalizado.
     assert ok_after.ran is True
@@ -268,7 +309,7 @@ async def test_topic_with_failed_agent_becomes_partial():
 async def test_topic_with_all_agents_ok_stays_completed_without_failed_agents():
     p = _pipeline_with([FakeAgent("problem_hunter", _ok({"pain_phrases": ["x"]}))])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     assert opp.status == OpportunityStatus.COMPLETED
     assert not opp.failed_agents  # None ou lista vazia â€” nunca falhas fantasma
@@ -284,7 +325,7 @@ async def test_failed_agents_recorded_even_when_discarded_later():
     )
     p = _pipeline_with([failing, discarder])
 
-    opp = await p._process_topic(FakeSession(), ACC, TOPIC)
+    opp = await p._process_topic(FakeSessionFactory(), ACC, TOPIC)
 
     # Descarte continua mandando no status final...
     assert opp.status == OpportunityStatus.DISCARDED
@@ -306,7 +347,7 @@ async def test_run_once_counts_partial_separately(monkeypatch):
 
     monkeypatch.setattr(p.trend_hunter, "discover_topics", one_topic)
 
-    summary = await p.run_once(FakeSession(), ACC)
+    summary = await p.run_once(FakeSessionFactory(), ACC)
 
     # PARTIAL nao pode se esconder dentro de "completed".
     assert summary["partial"] == 1
@@ -320,7 +361,7 @@ async def test_run_for_idea_sets_source_and_runs_agents():
     p = _pipeline_with([problem])
 
     opp = await p.run_for_idea(
-        FakeSession(), ACC, {"name": "Coleira GPS", "description": "rastreador pet"}, profile={}
+        FakeSessionFactory(), ACC, {"name": "Coleira GPS", "description": "rastreador pet"}, profile={}
     )
 
     assert opp.source == "founder_idea"
@@ -341,7 +382,7 @@ async def test_run_for_idea_ignores_founder_compatibility_discard():
     after = FakeAgent("monetization", _ok({"models": ["saas"]}))
     p = _pipeline_with([problem, compat, after])
 
-    opp = await p.run_for_idea(FakeSession(), ACC, {"name": "X", "description": "y"}, profile={})
+    opp = await p.run_for_idea(FakeSessionFactory(), ACC, {"name": "X", "description": "y"}, profile={})
 
     # NAO descarta por compatibilidade; a cadeia continua ate o fim.
     assert opp.status != OpportunityStatus.DISCARDED
@@ -359,8 +400,101 @@ async def test_run_for_idea_still_discards_on_other_agents():
     after = FakeAgent("monetization", _ok())
     p = _pipeline_with([problem, after])
 
-    opp = await p.run_for_idea(FakeSession(), ACC, {"name": "X", "description": "y"}, profile={})
+    opp = await p.run_for_idea(FakeSessionFactory(), ACC, {"name": "X", "description": "y"}, profile={})
 
     assert opp.status == OpportunityStatus.DISCARDED
     assert opp.discarded_by == "problem_hunter"
     assert after.ran is False
+
+
+# ----------------- Contrato de sessoes curtas (sessao != LLM) -----------------
+# A prova central do refactor: NENHUMA sessao aberta enquanto os agentes (LLMs)
+# rodam nem durante a descoberta de topicos. Sessao so existe nas fases curtas
+# de leitura (perfil) e de escrita (commit da Opportunity, 1 por topico).
+
+
+class SessionSpyAgent(BaseAgent):
+    """Registra quantas sessoes estavam abertas no instante em que rodou."""
+
+    name = "problem_hunter"
+
+    def __init__(self, factory: FakeSessionFactory) -> None:
+        self._factory = factory
+        self.open_during_run: int | None = None
+
+    async def run(self, context: PipelineContext) -> AgentResult:
+        self.open_during_run = self._factory.open_now
+        return _ok({"pain_phrases": ["x"]})
+
+
+async def test_no_session_open_during_discovery_and_agents(monkeypatch):
+    factory = FakeSessionFactory()
+    spy = SessionSpyAgent(factory)
+    p = _pipeline_with([spy])
+
+    open_during_discovery: list[int] = []
+
+    async def one_topic(limit, niche=""):
+        open_during_discovery.append(factory.open_now)
+        return {"topics": [TOPIC]}
+
+    monkeypatch.setattr(p.trend_hunter, "discover_topics", one_topic)
+
+    await p.run_once(factory, ACC)
+
+    assert open_during_discovery == [0]  # descoberta: sem sessao aberta
+    assert spy.open_during_run == 0      # agente (a fase LLM): sem sessao aberta
+    assert factory.open_now == 0         # nada vazou depois da rodada
+
+
+async def test_process_topic_commits_once_with_final_status():
+    factory = FakeSessionFactory()
+    p = _pipeline_with([FakeAgent("problem_hunter", _ok({"pain_phrases": ["x"]}))])
+
+    opp = await p._process_topic(factory, ACC, TOPIC)
+
+    # Exatamente 1 commit por topico, com o status JA final (nunca IN_PROGRESS
+    # no banco — linha parcial nao existe).
+    assert factory.commits == 1
+    assert factory.committed == [opp]
+    assert opp.status == OpportunityStatus.COMPLETED
+    assert factory.open_now == 0
+
+
+async def test_crash_on_second_topic_preserves_first(monkeypatch):
+    class ExplodingAgent(BaseAgent):
+        name = "problem_hunter"
+
+        async def run(self, context: PipelineContext) -> AgentResult:
+            if context.topic == "Boom":
+                raise RuntimeError("LLM explodiu")
+            return _ok({"pain_phrases": ["x"]})
+
+    factory = FakeSessionFactory()
+    p = _pipeline_with([ExplodingAgent()])
+
+    async def two_topics(limit, niche=""):
+        return {"topics": [{"name": "Good"}, {"name": "Boom"}]}
+
+    monkeypatch.setattr(p.trend_hunter, "discover_topics", two_topics)
+
+    with pytest.raises(RuntimeError):
+        await p.run_once(factory, ACC)
+
+    # 1 commit por topico: o topico 1 sobrevive ao crash do topico 2.
+    # (committed tambem contem o FounderProfile semeado na fase de leitura.)
+    committed_opps = [o for o in factory.committed if isinstance(o, Opportunity)]
+    assert [o.title for o in committed_opps] == ["Good"]
+    assert factory.open_now == 0  # crash nao deixa sessao pendurada
+
+
+async def test_commit_failure_propagates_and_persists_nothing():
+    factory = FakeSessionFactory(fail_commit_for={TOPIC["name"]})
+    p = _pipeline_with([FakeAgent("problem_hunter", _ok({"pain_phrases": ["x"]}))])
+
+    with pytest.raises(RuntimeError):
+        await p._process_topic(factory, ACC, TOPIC)
+
+    assert factory.commits == 0
+    assert factory.committed == []
+    assert factory.open_now == 0
