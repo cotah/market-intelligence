@@ -12,6 +12,8 @@ pipeline habilitada e enfileira uma rodada por conta.
 import asyncio
 import traceback
 import uuid
+
+import sentry_sdk
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, time
 from typing import TypeVar
@@ -34,7 +36,14 @@ T = TypeVar("T")
 
 async def _with_session(fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
     """Roda `fn(session)` com engine/sessao proprios e commit ao final."""
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    # connect timeout curto (default do asyncpg e 60s): cada task abre uma
+    # conexao NOVA, entao um soluco do Postgres/rede interna nao pode pendurar
+    # o worker por um minuto — falha rapido e quem chamou decide o que fazer.
+    engine = create_async_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        connect_args={"timeout": 10},
+    )
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with session_factory() as session:
@@ -286,7 +295,20 @@ def hunt_scheduler_dispatch() -> dict:
         result = await session.execute(stmt)
         return [str(acc) for acc in result.scalars().all()]
 
-    accounts = asyncio.run(_with_session(_due_accounts))
+    try:
+        accounts = asyncio.run(_with_session(_due_accounts))
+    except Exception as e:  # noqa: BLE001
+        # Soluco do banco (ex: TimeoutError no connect) NAO derruba o tick:
+        # loga, reporta ao Sentry como handled e devolve 0 contas — o Beat
+        # re-tenta naturalmente no proximo tick (5 min).
+        sentry_sdk.capture_exception(e)
+        log.error(
+            "worker.hunt_dispatch.failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            traceback=traceback.format_exc(),
+        )
+        return {"dispatched_accounts": 0, "error": type(e).__name__}
     for account_id in accounts:
         run_hunt_task.delay(account_id=account_id, trigger="scheduled")
     log.info("worker.hunt_dispatch.completed", accounts=len(accounts))

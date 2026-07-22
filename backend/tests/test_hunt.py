@@ -215,3 +215,31 @@ def test_hunt_dispatch_enqueues_due_accounts(monkeypatch):
     result = pipeline_worker.hunt_scheduler_dispatch.apply().get()
     assert result == {"dispatched_accounts": 2}
     assert dispatched == [("acc-a", "scheduled"), ("acc-b", "scheduled")]
+
+
+def test_hunt_dispatch_survives_db_timeout(monkeypatch):
+    """Soluco do banco (TimeoutError no connect) NAO pode derrubar o tick do Beat.
+
+    Reproduz o erro visto no Sentry (trace 9d98625f9da2): o dispatch loga,
+    reporta como handled e devolve 0 contas — o proximo tick re-tenta.
+    """
+
+    def _db_down(coro):
+        coro.close()
+        raise TimeoutError("connect to postgres.railway.internal:5432 timed out")
+
+    monkeypatch.setattr(pipeline_worker.asyncio, "run", _db_down)
+    dispatched: list = []
+    monkeypatch.setattr(
+        pipeline_worker.run_hunt_task, "delay", lambda **kwargs: dispatched.append(kwargs)
+    )
+    captured: list = []
+    monkeypatch.setattr(
+        pipeline_worker.sentry_sdk, "capture_exception", lambda e: captured.append(e)
+    )
+
+    result = pipeline_worker.hunt_scheduler_dispatch.apply()
+    assert result.successful()  # a task nao pode explodir
+    assert result.get() == {"dispatched_accounts": 0, "error": "TimeoutError"}
+    assert dispatched == []  # nada enfileirado num tick com banco fora
+    assert len(captured) == 1  # erro foi pro Sentry como handled
